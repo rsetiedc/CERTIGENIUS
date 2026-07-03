@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Upload Participants{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><i class="bi bi-people me-2" style="color: var(--primary);"></i>Upload Participants</h1>
+    <p>Import participant data from an Excel or CSV file</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-cloud-upload me-2" style="color: var(--primary);"></i>Import Data
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('upload_participants_post') }}" method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">Batch Name</label>
+                        <input type="text" class="form-control" name="batch_name"
+                               placeholder="e.g., Summer Workshop 2024">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Associate Template (optional)</label>
+                        <select class="form-select" name="template_id">
+                            <option value="">— No template selected —</option>
+                            {% for t in templates %}
+                            <option value="{{ t.id }}">{{ t.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Pre-select a template for this batch.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Participant Data File</label>
+                        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                            <i class="bi bi-file-spreadsheet"></i>
+                            <h5>Drop your file here or click to browse</h5>
+                            <p>Supported formats: CSV, XLSX, XLS</p>
+                            <input type="file" id="fileInput" name="participant_file"
+                                   accept=".csv,.xlsx,.xls" hidden required>
+                            <div id="fileInfo" class="mt-2 text-start d-none">
+                                <div class="alert alert-info py-2 mb-0">
+                                    <i class="bi bi-paperclip me-1"></i>
+                                    <span id="fileName"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-upload me-1"></i>Upload &amp; Parse Data
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header">
+                <i class="bi bi-info-circle me-2" style="color: var(--primary);"></i>File Format Guide
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">Your file should contain the following columns:</p>
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered small">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Column</th>
+                                <th>Required</th>
+                                <th>Example</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>Name</code></td>
+                                <td><span class="badge bg-success">Yes</span></td>
+                                <td>John Doe</td>
+                            </tr>
+                            <tr>
+                                <td><code>Email</code></td>
+                                <td><span class="badge bg-success">Yes</span></td>
+                                <td>john@example.com</td>
+                            </tr>
+                            <tr>
+                                <td><code>Prize Position</code></td>
+                                <td><span class="badge bg-warning text-dark">Recommended</span></td>
+                                <td>1st, 2nd, 3rd, Participation</td>
+                            </tr>
+                            <tr>
+                                <td><em>Any other columns</em></td>
+                                <td><span class="badge bg-light text-dark">Optional</span></td>
+                                <td>Event, Date, etc.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="small text-muted mt-2 mb-0">
+                    <i class="bi bi-download me-1"></i>
+                    <a href="#" class="text-decoration-none" onclick="downloadSample()">Download sample CSV template</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clock-history me-2" style="color: var(--primary);"></i>Recent Uploads</span>
+                <a href="{{ url_for('batches') }}" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            <div class="card-body p-0">
+                {% if batches %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Batch Name</th>
+                                <th>Participants</th>
+                                <th>Status</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for batch in batches[:10] %}
+                            <tr onclick="window.location='{{ url_for('batch_detail', batch_id=batch.id) }}'" style="cursor: pointer;">
+                                <td><strong>{{ batch.name }}</strong></td>
+                                <td>{{ batch.total_count }}</td>
+                                <td>
+                                    <span class="badge-status badge-{{ batch.status }}">
+                                        {{ batch.status|title }}
+                                    </span>
+                                </td>
+                                <td class="text-muted small">
+                                    {{ batch.created_at.strftime('%b %d, %Y') if batch.created_at else '—' }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <i class="bi bi-inbox"></i>
+                    <h4>No uploads yet</h4>
+                    <p>Import participant data to get started with certificate generation.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (file) {
+            document.getElementById('fileInfo').classList.remove('d-none');
+            document.getElementById('fileName').textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
+        }
+    });
+
+    var dropZone = document.getElementById('dropZone');
+    if (dropZone) {
+        dropZone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            this.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+        });
+        dropZone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+            var files = e.dataTransfer.files;
+            if (files.length) {
+                document.getElementById('fileInput').files = files;
+                document.getElementById('fileInfo').classList.remove('d-none');
+                document.getElementById('fileName').textContent = files[0].name + ' (' + (files[0].size / 1024).toFixed(0) + ' KB)';
+            }
+        });
+    }
+
+    function downloadSample() {
+        var csv = 'Name,Email,Prize Position,Event\n';
+        csv += 'John Doe,john@example.com,1st,Annual Conference 2024\n';
+        csv += 'Jane Smith,jane@example.com,2nd,Annual Conference 2024\n';
+        csv += 'Bob Johnson,bob@example.com,Participation,Annual Conference 2024\n';
+        csv += 'Alice Brown,alice@example.com,3rd,Annual Conference 2024\n';
+
+        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        var link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'sample_participants.csv';
+        link.click();
+    }
+</script>
+{% endblock %}

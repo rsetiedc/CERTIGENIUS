@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Template Management{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center">
+    <div>
+        <h1><i class="bi bi-files me-2" style="color: var(--primary);"></i>Templates</h1>
+        <p>Upload and manage your certificate templates</p>
+    </div>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+        <i class="bi bi-plus-lg me-1"></i>Upload Template
+    </button>
+</div>
+
+<!-- Upload Modal -->
+<div class="modal fade" id="uploadModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold">
+                    <i class="bi bi-cloud-upload me-2" style="color: var(--primary);"></i>Upload Certificate Template
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{{ url_for('upload_template') }}" method="POST" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Template Name</label>
+                        <input type="text" class="form-control" name="name" placeholder="e.g., Conference Certificate 2024">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description (optional)</label>
+                        <textarea class="form-control" name="description" rows="2" placeholder="Brief description of this template"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Template File</label>
+                        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                            <i class="bi bi-file-earmark-pdf"></i>
+                            <h5>Drop your template here or click to browse</h5>
+                            <p>Supported formats: PNG, JPG, JPEG, PDF</p>
+                            <input type="file" id="fileInput" name="template_file" accept=".png,.jpg,.jpeg,.pdf" hidden required>
+                            <div id="fileInfo" class="mt-2 text-start d-none">
+                                <div class="alert alert-info py-2 mb-0">
+                                    <i class="bi bi-paperclip me-1"></i> <span id="fileName"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Placeholder Fields</label>
+                        <input type="text" class="form-control" name="placeholder_fields"
+                               placeholder="e.g., participant_name, prize_position, event_name, date"
+                               value="participant_name, prize_position, event_name, date">
+                        <div class="form-text">
+                            Comma-separated field names that will be replaced with participant data.
+                            These correspond to columns in your participant Excel file.
+                        </div>
+                    </div>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        For best results, use a high-resolution template (1200x800px or larger).
+                        Placeholder text positions can be fine-tuned after upload.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-cloud-upload me-1"></i>Upload Template
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Templates Grid -->
+{% if templates %}
+<div class="row g-4">
+    {% for template in templates %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div>
+                        <h5 class="fw-bold mb-1">{{ template.name }}</h5>
+                        <small class="text-muted">
+                            <i class="bi bi-file-earmark-{{ 'pdf' if template.file_type == 'pdf' else 'image' }} me-1"></i>
+                            {{ template.file_type|upper }}
+                        </small>
+                    </div>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-light" data-bs-toggle="dropdown">
+                            <i class="bi bi-three-dots-vertical"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li>
+                                <a class="dropdown-item" href="{{ url_for('template_detail', template_id=template.id) }}">
+                                    <i class="bi bi-eye me-2"></i>View Details
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <form action="{{ url_for('delete_template', template_id=template.id) }}" method="POST"
+                                      onsubmit="return confirm('Delete template &ldquo;{{ template.name }}&rdquo;? This cannot be undone.');">
+                                    <button type="submit" class="dropdown-item text-danger">
+                                        <i class="bi bi-trash me-2"></i>Delete
+                                    </button>
+                                </form>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                {% if template.description %}
+                <p class="text-muted small mb-3">{{ template.description }}</p>
+                {% endif %}
+
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-muted mb-2">Placeholder Fields</label>
+                    <div>
+                        {% for field in template.get_placeholders() %}
+                        <span class="placeholder-tag">{{ field }}</span>
+                        {% else %}
+                        <span class="text-muted small">No placeholders defined</span>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted">
+                        <i class="bi bi-calendar me-1"></i>
+                        {{ template.created_at.strftime('%b %d, %Y') if template.created_at else '—' }}
+                    </small>
+                    <span class="badge bg-light text-dark">
+                        <i class="bi bi-{{ 'filetype-pdf' if template.file_type == 'pdf' else 'filetype-png' }} me-1"></i>
+                        {{ template.file_type|upper }}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <i class="bi bi-files"></i>
+    <h4>No templates uploaded yet</h4>
+    <p>Upload a certificate template to get started. Supported formats: PNG, JPG, PDF.</p>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+        <i class="bi bi-plus-lg me-1"></i>Upload Your First Template
+    </button>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (file) {
+            document.getElementById('fileInfo').classList.remove('d-none');
+            document.getElementById('fileName').textContent = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
+        }
+    });
+
+    // Drag and drop
+    var dropZone = document.getElementById('dropZone');
+    if (dropZone) {
+        dropZone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            this.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+        });
+        dropZone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+            var files = e.dataTransfer.files;
+            if (files.length) {
+                document.getElementById('fileInput').files = files;
+                document.getElementById('fileInfo').classList.remove('d-none');
+                document.getElementById('fileName').textContent = files[0].name + ' (' + (files[0].size / 1024 / 1024).toFixed(2) + ' MB)';
+            }
+        });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block title %}Batch: {{ batch.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('batches') }}" class="text-decoration-none">Batches</a></li>
+                <li class="breadcrumb-item active">{{ batch.name }}</li>
+            </ol>
+        </nav>
+        <h1><i class="bi bi-layers me-2" style="color: var(--primary);"></i>{{ batch.name }}</h1>
+    </div>
+    <div class="d-flex gap-2">
+        {% if batch.status in ('pending', 'generated', 'completed') and batch.total_count > 0 %}
+            {% if batch.status != 'generated' and batch.status != 'completed' %}
+            <form action="{{ url_for('generate_certificates', batch_id=batch.id) }}" method="POST" class="d-inline">
+                <button type="submit" class="btn btn-success"
+                        onclick="return confirm('Generate certificates for all participants in this batch?');">
+                    <i class="bi bi-magic me-1"></i>Generate Certificates
+                </button>
+            </form>
+            {% endif %}
+        {% endif %}
+        {% if batch.status in ('generated', 'completed') and batch.generated_count > 0 %}
+            <form action="{{ url_for('distribute_certificates', batch_id=batch.id) }}" method="POST" class="d-inline">
+                <button type="submit" class="btn btn-primary"
+                        onclick="return confirm('Send {{ batch.generated_count }} certificate(s) via email to all participants?');">
+                    <i class="bi bi-envelope-paper me-1"></i>Distribute via Email
+                </button>
+            </form>
+        {% endif %}
+        <form action="{{ url_for('delete_batch', batch_id=batch.id) }}" method="POST" class="d-inline"
+              onsubmit="return confirm('Delete this batch and all associated certificates?');">
+            <button type="submit" class="btn btn-outline-danger">
+                <i class="bi bi-trash me-1"></i>Delete
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Batch Status Overview -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="stat-icon primary">
+                <i class="bi bi-people"></i>
+            </div>
+            <div class="stat-value">{{ batch.total_count }}</div>
+            <div class="stat-label">Total Participants</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="stat-icon success">
+                <i class="bi bi-check-circle"></i>
+            </div>
+            <div class="stat-value">{{ batch.generated_count }}</div>
+            <div class="stat-label">Certificates Generated</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="stat-icon info">
+                <i class="bi bi-envelope"></i>
+            </div>
+            <div class="stat-value">{{ batch.sent_count }}</div>
+            <div class="stat-label">Emails Sent</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="stat-icon warning">
+                <i class="bi bi-exclamation-triangle"></i>
+            </div>
+            <div class="stat-value">{{ batch.failed_count }}</div>
+            <div class="stat-label">Failed</div>
+        </div>
+    </div>
+</div>
+
+<!-- Progress & Status -->
+<div class="row g-4 mb-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-graph-up me-2" style="color: var(--primary);"></i>Progress
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between mb-2">
+                    <span class="fw-bold">Overall Progress</span>
+                    <span class="fw-bold">
+                        {% if batch.total_count > 0 %}
+                            {{ ((batch.sent_count + batch.generated_count) / batch.total_count * 100)|round }}%
+                        {% else %}
+                            0%
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="progress-gradient mb-4">
+                    <div class="progress-bar" role="progressbar"
+                         style="width: {{ ((batch.sent_count + batch.generated_count) / batch.total_count * 100) if batch.total_count > 0 else 0 }}%">
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between text-center">
+                    <div>
+                        <span class="badge-status badge-pending">{{ batch.total_count }} Total</span>
+                    </div>
+                    <div>
+                        <span class="badge-status badge-generated">{{ batch.generated_count }} Generated</span>
+                    </div>
+                    <div>
+                        <span class="badge-status badge-completed">{{ batch.sent_count }} Sent</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-info-circle me-2" style="color: var(--primary);"></i>Batch Information
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tr>
+                        <td class="text-muted">Status</td>
+                        <td>
+                            <span class="badge-status badge-{{ batch.status }}">
+                                {% if batch.status == 'generating' %}
+                                    <i class="bi bi-arrow-repeat me-1"></i>
+                                {% elif batch.status == 'distributing' %}
+                                    <i class="bi bi-arrow-repeat me-1"></i>
+                                {% endif %}
+                                {{ batch.status|title }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% if batch.template %}
+                    <tr>
+                        <td class="text-muted">Template</td>
+                        <td>{{ batch.template.name }}</td>
+                    </tr>
+                    {% endif %}
+                    <tr>
+                        <td class="text-muted">Created</td>
+                        <td>{{ batch.created_at.strftime('%B %d, %Y at %I:%M %p') if batch.created_at else '—' }}</td>
+                    </tr>
+                    {% if batch.completed_at %}
+                    <tr>
+                        <td class="text-muted">Completed</td>
+                        <td>{{ batch.completed_at.strftime('%B %d, %Y at %I:%M %p') }}</td>
+                    </tr>
+                    {% endif %}
+                    {% if batch.error_message %}
+                    <tr>
+                        <td class="text-muted">Errors</td>
+                        <td>
+                            <span class="text-danger small">{{ batch.error_message }}</span>
+                        </td>
+                    </tr>
+                    {% endif %}
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Participants Table -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-people me-2" style="color: var(--primary);"></i>Participants</span>
+        <span class="badge bg-light text-dark">{{ participants|length }} total</span>
+    </div>
+    <div class="card-body p-0">
+        {% if participants %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Prize Position</th>
+                        <th>Certificate</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for participant in participants %}
+                    {% set participant_cert = certificates|selectattr('participant_id', 'equalto', participant.id)|first %}
+                    <tr>
+                        <td class="text-muted">{{ loop.index }}</td>
+                        <td class="fw-bold">{{ participant.name }}</td>
+                        <td>{{ participant.email }}</td>
+                        <td>
+                            <span class="badge bg-light text-dark">{{ participant.prize_position }}</span>
+                        </td>
+                        <td>
+                            {% if participant_cert and participant_cert.file_path %}
+                            <a href="{{ url_for('download_certificate', cert_id=participant_cert.id) }}"
+                               class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-download me-1"></i>Download
+                            </a>
+                            {% else %}
+                            <span class="text-muted small">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if participant_cert %}
+                            <span class="badge-status badge-{{ participant_cert.status }}">
+                                {% if participant_cert.status == 'generated' %}
+                                    <i class="bi bi-check me-1"></i>
+                                {% elif participant_cert.status == 'sent' %}
+                                    <i class="bi bi-envelope me-1"></i>
+                                {% elif participant_cert.status == 'failed' %}
+                                    <i class="bi bi-x me-1"></i>
+                                {% else %}
+                                    <i class="bi bi-clock me-1"></i>
+                                {% endif %}
+                                {{ participant_cert.status|title }}
+                            </span>
+                            {% if participant_cert.error_message %}
+                            <br>
+                            <small class="text-danger">{{ participant_cert.error_message[:50] }}</small>
+                            {% endif %}
+                            {% else %}
+                            <span class="badge-status badge-pending">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if participant_cert and participant_cert.file_path %}
+                            <a href="{{ url_for('download_certificate', cert_id=participant_cert.id) }}"
+                               class="btn btn-sm btn-light">
+                                <i class="bi bi-download"></i>
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <i class="bi bi-people"></i>
+            <h4>No participants in this batch</h4>
+            <p>Upload participant data to get started.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Certificates Table -->
+{% if certificates %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-files me-2" style="color: var(--primary);"></i>Generated Certificates</span>
+        <span class="badge bg-light text-dark">{{ certificates|length }} total</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Participant</th>
+                        <th>Status</th>
+                        <th>Sent At</th>
+                        <th>Error</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cert in certificates %}
+                    <tr>
+                        <td class="text-muted">{{ loop.index }}</td>
+                        <td class="fw-bold">{{ cert.participant.name if cert.participant else 'Unknown' }}</td>
+                        <td>
+                            <span class="badge-status badge-{{ cert.status }}">
+                                {% if cert.status == 'sent' %}
+                                    <i class="bi bi-envelope me-1"></i>
+                                {% elif cert.status == 'generated' %}
+                                    <i class="bi bi-check me-1"></i>
+                                {% elif cert.status == 'failed' %}
+                                    <i class="bi bi-x me-1"></i>
+                                {% else %}
+                                    <i class="bi bi-clock me-1"></i>
+                                {% endif %}
+                                {{ cert.status|title }}
+                            </span>
+                        </td>
+                        <td class="text-muted small">
+                            {{ cert.sent_at.strftime('%b %d, %Y %I:%M %p') if cert.sent_at else '—' }}
+                        </td>
+                        <td class="text-danger small">{{ cert.error_message[:60] if cert.error_message else '—' }}</td>
+                        <td>
+                            {% if cert.file_path %}
+                            <a href="{{ url_for('download_certificate', cert_id=cert.id) }}"
+                               class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-download"></i>
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Auto-refresh for active batches
+    {% if batch.status in ('generating', 'distributing') %}
+    setTimeout(function() {
+        window.location.reload();
+    }, 5000);
+    {% endif %}
+</script>
+{% endblock %}

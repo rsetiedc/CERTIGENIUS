@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center">
+    <div>
+        <h1><i class="bi bi-speedometer2 me-2" style="color: var(--primary);"></i>Dashboard</h1>
+        <p>Overview of your certificate platform activity</p>
+    </div>
+    <div>
+        <a href="{{ url_for('templates') }}" class="btn btn-primary me-2">
+            <i class="bi bi-plus-lg me-1"></i>Upload Template
+        </a>
+        <a href="{{ url_for('upload_participants') }}" class="btn btn-outline-primary">
+            <i class="bi bi-upload me-1"></i>Import Participants
+        </a>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="stat-icon primary">
+                <i class="bi bi-files"></i>
+            </div>
+            <div class="stat-value">{{ template_count }}</div>
+            <div class="stat-label">Certificate Templates</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="stat-icon success">
+                <i class="bi bi-people"></i>
+            </div>
+            <div class="stat-value">{{ participant_count }}</div>
+            <div class="stat-label">Total Participants</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="stat-icon info">
+                <i class="bi bi-layers"></i>
+            </div>
+            <div class="stat-value">{{ batch_count }}</div>
+            <div class="stat-label">Certificate Batches</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="stat-icon warning">
+                <i class="bi bi-envelope-paper"></i>
+            </div>
+            <div class="stat-value">{{ sent_count }}/{{ certificate_count }}</div>
+            <div class="stat-label">Certificates Sent</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Quick Actions -->
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-lightning-charge me-2" style="color: var(--primary);"></i>Quick Actions
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-3">
+                    <a href="{{ url_for('templates') }}" class="btn btn-primary">
+                        <i class="bi bi-files me-2"></i>Manage Templates
+                    </a>
+                    <a href="{{ url_for('upload_participants') }}" class="btn btn-success">
+                        <i class="bi bi-people me-2"></i>Upload Participants
+                    </a>
+                    <a href="{{ url_for('batches') }}" class="btn btn-outline-primary">
+                        <i class="bi bi-layers me-2"></i>View All Batches
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Batches -->
+    <div class="col-md-8">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clock-history me-2" style="color: var(--primary);"></i>Recent Batches</span>
+                <a href="{{ url_for('batches') }}" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            <div class="card-body p-0">
+                {% if recent_batches %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Batch Name</th>
+                                <th>Status</th>
+                                <th>Progress</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for batch in recent_batches %}
+                            <tr onclick="window.location='{{ url_for('batch_detail', batch_id=batch.id) }}'" style="cursor: pointer;">
+                                <td>
+                                    <strong>{{ batch.name }}</strong>
+                                </td>
+                                <td>
+                                    <span class="badge-status badge-{{ batch.status }}">
+                                        {% if batch.status == 'pending' %}
+                                            <i class="bi bi-hourglass me-1"></i>
+                                        {% elif batch.status == 'generating' %}
+                                            <i class="bi bi-gear me-1"></i>
+                                        {% elif batch.status == 'generated' %}
+                                            <i class="bi bi-check me-1"></i>
+                                        {% elif batch.status == 'distributing' %}
+                                            <i class="bi bi-envelope me-1"></i>
+                                        {% elif batch.status == 'completed' %}
+                                            <i class="bi bi-check-circle me-1"></i>
+                                        {% elif batch.status == 'failed' %}
+                                            <i class="bi bi-x-circle me-1"></i>
+                                        {% endif %}
+                                        {{ batch.status|title }}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if batch.total_count > 0 %}
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="flex-grow-1">
+                                            <div class="progress-gradient">
+                                                <div class="progress-bar" role="progressbar"
+                                                     style="width: {{ ((batch.sent_count + batch.failed_count) / batch.total_count * 100) if batch.total_count > 0 else 0 }}%">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <small class="text-muted">{{ batch.sent_count }}/{{ batch.total_count }}</small>
+                                    </div>
+                                    {% else %}
+                                    <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-muted">
+                                    <small>{{ batch.created_at.strftime('%b %d, %Y') if batch.created_at else '—' }}</small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <i class="bi bi-inbox"></i>
+                    <h4>No batches yet</h4>
+                    <p>Upload participant data to create your first batch of certificates.</p>
+                    <a href="{{ url_for('upload_participants') }}" class="btn btn-primary">
+                        <i class="bi bi-upload me-1"></i>Upload Participants
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Workflow Guide -->
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-diagram-3 me-2" style="color: var(--primary);"></i>Workflow Guide
+    </div>
+    <div class="card-body">
+        <div class="row g-4">
+            <div class="col-md-3 text-center">
+                <div class="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style="width: 60px; height: 60px;">
+                    <span class="fw-bold fs-4" style="color: var(--primary);">1</span>
+                </div>
+                <h6 class="fw-bold">Upload Template</h6>
+                <small class="text-muted">Upload a certificate template (PNG, JPG, PDF) and define placeholder fields.</small>
+            </div>
+            <div class="col-md-3 text-center">
+                <div class="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style="width: 60px; height: 60px;">
+                    <span class="fw-bold fs-4" style="color: var(--primary);">2</span>
+                </div>
+                <h6 class="fw-bold">Import Participants</h6>
+                <small class="text-muted">Upload an Excel or CSV file with participant names, emails, and prize positions.</small>
+            </div>
+            <div class="col-md-3 text-center">
+                <div class="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style="width: 60px; height: 60px;">
+                    <span class="fw-bold fs-4" style="color: var(--primary);">3</span>
+                </div>
+                <h6 class="fw-bold">Generate Certificates</h6>
+                <small class="text-muted">The system automatically populates templates with participant data.</small>
+            </div>
+            <div class="col-md-3 text-center">
+                <div class="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style="width: 60px; height: 60px;">
+                    <span class="fw-bold fs-4" style="color: var(--primary);">4</span>
+                </div>
+                <h6 class="fw-bold">Distribute via Email</h6>
+                <small class="text-muted">Send personalized certificates directly to participants' Gmail inboxes.</small>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
