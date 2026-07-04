@@ -6,6 +6,12 @@
     <div>
         <h1><i class="bi bi-files me-2" style="color: var(--primary);"></i>Templates</h1>
         <p>Upload and manage your certificate templates</p>
+        <p class="small text-muted mt-1 mb-0">
+            <i class="bi bi-download me-1"></i>
+            <a href="{{ url_for('download_sample_template') }}" class="text-decoration-none">Download sample certificate template</a>
+            &middot;
+            <span class="text-muted">PNG, 1200x800px with placeholder fields marked</span>
+        </p>
     </div>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
         <i class="bi bi-plus-lg me-1"></i>Upload Template

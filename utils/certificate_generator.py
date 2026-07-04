@@ -8,6 +8,8 @@ import os
 import tempfile
 from io import BytesIO
 
+from collections import Counter
+
 from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.pagesizes import landscape
 from reportlab.pdfbase import pdfmetrics
@@ -75,11 +77,73 @@ def _get_bold_font(font_path):
     return font_path
 
 
+def _sample_background_color(img, cx, cy, radius=8):
+    """
+    Sample the most common color around a bounding box area to use as a masking background.
+    Samples from multiple points (center, above, below, left, right of the area)
+    to avoid picking up a decorative border or accent line.
+    Falls back to white if the image can't be sampled.
+    """
+    width, height = img.size
+
+    # Sample from multiple points around the area for robustness
+    sample_points = [
+        (cx, cy),           # center
+        (cx, max(0, cy - radius * 2)),  # above
+        (cx, min(height - 1, cy + radius * 2)),  # below
+        (max(0, cx - radius * 2), cy),  # left
+        (min(width - 1, cx + radius * 2), cy),  # right
+    ]
+
+    pixels = []
+    for px, py in sample_points:
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                sx = px + dx
+                sy = py + dy
+                if 0 <= sx < width and 0 <= sy < height:
+                    try:
+                        p = img.getpixel((sx, sy))
+                        if isinstance(p, tuple):
+                            pixels.append(p[:3])  # Use RGB
+                        else:
+                            pixels.append((p, p, p))
+                    except Exception:
+                        pass
+
+    if pixels:
+        return Counter(pixels).most_common(1)[0][0]
+    return (255, 255, 255)
+
+
+def _erase_text_area(draw, img, text_x, text_y, text_width, text_height, padding=6):
+    """
+    Erase a rectangular area by painting over it with the sampled background color.
+    This removes any placeholder text baked into the template before drawing new text.
+    """
+    # Sample background color from just above the text area
+    bg_color = _sample_background_color(
+        img, 
+        text_x + text_width // 2, 
+        max(0, text_y - 10)
+    )
+    
+    # Paint a filled rectangle to erase any placeholder text or artifacts
+    draw.rectangle(
+        [
+            (text_x - padding, text_y - padding),
+            (text_x + text_width + padding, text_y + text_height + padding),
+        ],
+        fill=bg_color,
+    )
+
+
 def generate_from_image_template(
     template_path, output_path, data, placeholders=None, dpi=300
 ):
     """
     Generate a certificate from an image template by drawing text on it.
+    Automatically masks/erases placeholder text areas before drawing values.
 
     Args:
         template_path: Path to the template image
@@ -89,10 +153,13 @@ def generate_from_image_template(
                       If None, fields are auto-positioned.
     """
     img = Image.open(template_path).convert("RGBA")
-    overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
-    draw = ImageDraw.Draw(overlay)
+    
+    # Work directly on the image (not a transparent overlay) so we can
+    # erase placeholder text before drawing new values.
+    img_rgb = img.convert("RGB")
+    draw = ImageDraw.Draw(img_rgb)
 
-    width, height = img.size
+    width, height = img_rgb.size
 
     # Get available fonts
     fonts = _get_available_fonts()
@@ -118,7 +185,10 @@ def generate_from_image_template(
             if isinstance(color, str):
                 # Parse hex color
                 color = color.lstrip("#")
-                color = tuple(int(color[i : i + 2], 16) for i in (0, 2, 4)) + (255,)
+                color = tuple(int(color[i : i + 2], 16) for i in (0, 2, 4))
+
+            if len(color) == 4:
+                color = color[:3]  # Strip alpha for RGB mode
 
             font = _get_font(font_path, font_size)
 
@@ -136,6 +206,8 @@ def generate_from_image_template(
 
             text_y = y - text_height // 2
 
+            # Erase any placeholder text at this position before drawing
+            _erase_text_area(draw, img_rgb, text_x, text_y, text_width, text_height)
             draw.text((text_x, text_y), str(value), fill=color, font=font)
     else:
         # Auto-position placeholders with smart layout
@@ -145,7 +217,6 @@ def generate_from_image_template(
         # Draw each field with automatic positioning
         center_x = width // 2
         start_y = height // 3
-        line_height = font_size + 20
 
         special_fields = {
             "participant_name": {"size": font_size + 20, "y_offset": 0},
@@ -170,23 +241,23 @@ def generate_from_image_template(
 
             bbox = draw.textbbox((0, 0), str(value), font=use_font)
             text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
             text_x = center_x - text_width // 2
+            text_y = height // 3 + y_offset
 
+            # Erase any placeholder text at this position before drawing
+            _erase_text_area(draw, img_rgb, text_x, text_y, text_width, text_height)
             draw.text(
-                (text_x, height // 3 + y_offset),
+                (text_x, text_y),
                 str(value),
                 fill=(0, 0, 0, 255),
                 font=use_font,
             )
 
-    # Composite and save
-    result = Image.alpha_composite(img, overlay)
-    result = result.convert("RGB")
-
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    result.save(output_path, "PDF", resolution=dpi)
+    img_rgb.save(output_path, "PDF", resolution=dpi)
     return output_path
 
 

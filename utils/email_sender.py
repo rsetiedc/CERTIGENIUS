@@ -1,5 +1,6 @@
 """
 Email sender module for distributing certificates via Gmail SMTP.
+Uses Gmail's SMTP server with App Passwords for authentication.
 """
 
 import logging
@@ -124,25 +125,26 @@ EMAIL_TEMPLATE = """
 
 
 class EmailSender:
-    """Handles sending certificate emails via SMTP (Gmail)."""
+    """Handles sending certificate emails via Gmail SMTP with an App Password."""
 
-    def __init__(self):
+    def __init__(self, sender_email=None):
         self.server = Config.MAIL_SERVER
         self.port = Config.MAIL_PORT
         self.use_tls = Config.MAIL_USE_TLS
         self.username = Config.MAIL_USERNAME
         self.password = Config.MAIL_PASSWORD
-        self.sender = Config.MAIL_DEFAULT_SENDER
+        self.sender = sender_email or Config.MAIL_DEFAULT_SENDER
 
     def is_configured(self):
-        """Check if email settings are configured."""
+        """Check if Gmail SMTP credentials are configured."""
         return bool(self.username and self.password and self.sender)
 
     def send_certificate(
-        self, recipient_name, recipient_email, certificate_path, prize_position="Participation", event_name=""
+        self, recipient_name, recipient_email, certificate_path,
+        prize_position="Participation", event_name=""
     ):
         """
-        Send a certificate via email.
+        Send a certificate via Gmail SMTP.
 
         Args:
             recipient_name: Name of the recipient
@@ -155,13 +157,18 @@ class EmailSender:
             (success: bool, message: str)
         """
         if not self.is_configured():
-            return False, "Email sender is not configured. Set MAIL_USERNAME and MAIL_PASSWORD."
+            return (
+                False,
+                "Email sender is not configured. "
+                "Set MAIL_USERNAME and MAIL_PASSWORD in .env file. "
+                "For Gmail, use an App Password from https://myaccount.google.com/apppasswords",
+            )
 
         try:
             msg = MIMEMultipart("mixed")
             msg["From"] = formataddr(("CertiGenius", self.sender))
             msg["To"] = recipient_email
-            msg["Subject"] = f"🎉 Your Certificate - {prize_position}"
+            msg["Subject"] = f"\U0001f389 Your Certificate - {prize_position}"
 
             # HTML body
             html_body = EMAIL_TEMPLATE.format(
@@ -181,14 +188,14 @@ class EmailSender:
                 )
                 msg.attach(attachment)
 
-            # Connect and send
+            # Connect to Gmail SMTP and send
             if self.use_tls:
-                server = smtplib.SMTP(self.server, self.port)
+                server = smtplib.SMTP(self.server, self.port, timeout=30)
                 server.ehlo()
                 server.starttls()
                 server.ehlo()
             else:
-                server = smtplib.SMTP(self.server, self.port)
+                server = smtplib.SMTP(self.server, self.port, timeout=30)
 
             server.login(self.username, self.password)
             server.send_message(msg)
@@ -199,14 +206,20 @@ class EmailSender:
 
         except smtplib.SMTPAuthenticationError:
             error_msg = (
-                "SMTP authentication failed. For Gmail, you need to use an App Password. "
-                "Go to https://myaccount.google.com/apppasswords to generate one."
+                "Gmail rejected the app password. "
+                "Go to https://myaccount.google.com/apppasswords, "
+                "generate a new one for 'CertiGenius', and update MAIL_PASSWORD in .env"
             )
             logger.error(error_msg)
             return False, error_msg
 
         except smtplib.SMTPException as e:
             error_msg = f"SMTP error sending to {recipient_email}: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+
+        except FileNotFoundError:
+            error_msg = f"Certificate file not found: {certificate_path}"
             logger.error(error_msg)
             return False, error_msg
 

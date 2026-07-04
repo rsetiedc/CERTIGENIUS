@@ -23,6 +23,10 @@ from flask import (
 
 from config import Config
 from models import Certificate, CertificateBatch, Participant, Template, db
+import io
+
+import openpyxl
+
 from utils.certificate_generator import generate_certificate
 from utils.email_sender import EmailSender
 from utils.excel_parser import parse_file
@@ -448,7 +452,8 @@ def register_routes(app):
     def distribute_certificates(batch_id):
         batch = CertificateBatch.query.get_or_404(batch_id)
 
-        email_sender = EmailSender()
+        sender_email = request.form.get("sender_email", "").strip()
+        email_sender = EmailSender(sender_email=sender_email if sender_email else None)
         if not email_sender.is_configured():
             flash(
                 "Email sender is not configured. Please set MAIL_USERNAME and MAIL_PASSWORD in .env file.",
@@ -554,6 +559,301 @@ def register_routes(app):
             download_name=f"certificate_{cert.participant.name.replace(' ', '_')}.pdf"
             if cert.participant
             else "certificate.pdf",
+        )
+
+    # ---------- Sample Template Download ----------
+
+    @app.route("/sample-template")
+    def download_sample_template():
+        """Generate and download a sample certificate template PNG."""
+        from PIL import Image, ImageDraw, ImageFont
+
+        width, height = 1200, 800
+        img = Image.new("RGB", (width, height), (255, 255, 255))
+        draw = ImageDraw.Draw(img)
+
+        # ---------- Helper ----------
+        def _font(size, bold=False):
+            candidates = [
+                "/System/Library/Fonts/Helvetica.ttc",
+                "/System/Library/Fonts/Helvetica.ttf",
+                "/Library/Fonts/Arial.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ]
+            if bold:
+                bold_candidates = [
+                    "/System/Library/Fonts/Helvetica-Bold.ttf",
+                    "/Library/Fonts/Arial Bold.ttf",
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                ]
+                candidates = bold_candidates + candidates
+            for p in candidates:
+                if os.path.exists(p):
+                    try:
+                        return ImageFont.truetype(p, size)
+                    except (IOError, OSError):
+                        pass
+            return ImageFont.load_default()
+
+        # ---------- Colors ----------
+        primary = (102, 126, 234)       # #667EEA
+        dark = (33, 37, 41)
+        gray = (108, 117, 125)
+        light_gray = (241, 243, 247)
+        accent_gold = (212, 175, 55)
+
+        # ---------- Background ----------
+        draw.rectangle([(0, 0), (width, height)], fill=(248, 249, 252))
+
+        # ---------- Outer decorative border ----------
+        margin = 20
+        draw.rectangle(
+            [(margin, margin), (width - margin, height - margin)],
+            outline=primary,
+            width=3,
+        )
+        # Inner border
+        margin2 = 30
+        draw.rectangle(
+            [(margin2, margin2), (width - margin2, height - margin2)],
+            outline=primary,
+            width=1,
+        )
+
+        # ---------- Top accent bar ----------
+        draw.rectangle([(margin2, margin2), (width - margin2, margin2 + 8)], fill=primary)
+        # Bottom accent bar
+        draw.rectangle([(margin2, height - margin2 - 8), (width - margin2, height - margin2)], fill=primary)
+
+        # ---------- Corner decorative elements ----------
+        corner_size = 40
+        for cx, cy in [(margin2, margin2), (width - margin2, margin2), (margin2, height - margin2), (width - margin2, height - margin2)]:
+            draw.ellipse([(cx - 6, cy - 6), (cx + 6, cy + 6)], fill=accent_gold)
+
+        # ---------- Title ----------
+        title_font = _font(42, bold=True)
+        title_text = "CERTIFICATE OF ACHIEVEMENT"
+        bbox = draw.textbbox((0, 0), title_text, font=title_font)
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, 100),
+            title_text,
+            fill=primary,
+            font=title_font,
+        )
+
+        # ---------- Decorative line under title ----------
+        line_y = 155
+        line_width = 300
+        draw.line(
+            [(width // 2 - line_width // 2, line_y), (width // 2 + line_width // 2, line_y)],
+            fill=accent_gold,
+            width=2,
+        )
+
+        # ---------- "This certifies that" ----------
+        sub_font = _font(18)
+        sub_text = "This certifies that"
+        bbox = draw.textbbox((0, 0), sub_text, font=sub_font)
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, 190),
+            sub_text,
+            fill=gray,
+            font=sub_font,
+        )
+
+        # ---------- Placeholder: Participant Name ----------
+        ph_name_y = 250
+        name_font = _font(48, bold=True)
+        name_label = "[participant_name]"
+        bbox = draw.textbbox((0, 0), name_label, font=name_font)
+        # Highlighted background box for the placeholder
+        ph_box_pad = 20
+        ph_box_x1 = (width - (bbox[2] - bbox[0])) // 2 - ph_box_pad
+        ph_box_x2 = (width + (bbox[2] - bbox[0])) // 2 + ph_box_pad
+        ph_box_y1 = ph_name_y - 10
+        ph_box_y2 = ph_name_y + (bbox[3] - bbox[1]) + 10
+        draw.rounded_rectangle(
+            [(ph_box_x1, ph_box_y1), (ph_box_x2, ph_box_y2)],
+            radius=8,
+            fill=light_gray,
+            outline=primary,
+            width=2,
+        )
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, ph_name_y),
+            name_label,
+            fill=primary,
+            font=name_font,
+        )
+
+        # ---------- "for achieving" ----------
+        ach_font = _font(18)
+        ach_text = "for achieving"
+        bbox = draw.textbbox((0, 0), ach_text, font=ach_font)
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, 340),
+            ach_text,
+            fill=gray,
+            font=ach_font,
+        )
+
+        # ---------- Placeholder: Prize Position ----------
+        prize_y = 390
+        prize_font = _font(30, bold=True)
+        prize_label = "[prize_position]"
+        bbox = draw.textbbox((0, 0), prize_label, font=prize_font)
+        ph_box_x1 = (width - (bbox[2] - bbox[0])) // 2 - ph_box_pad
+        ph_box_x2 = (width + (bbox[2] - bbox[0])) // 2 + ph_box_pad
+        ph_box_y1 = prize_y - 8
+        ph_box_y2 = prize_y + (bbox[3] - bbox[1]) + 8
+        draw.rounded_rectangle(
+            [(ph_box_x1, ph_box_y1), (ph_box_x2, ph_box_y2)],
+            radius=8,
+            fill=light_gray,
+            outline=primary,
+            width=2,
+        )
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, prize_y),
+            prize_label,
+            fill=primary,
+            font=prize_font,
+        )
+
+        # ---------- "at" ----------
+        at_font = _font(16)
+        at_text = "at"
+        bbox = draw.textbbox((0, 0), at_text, font=at_font)
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, 450),
+            at_text,
+            fill=gray,
+            font=at_font,
+        )
+
+        # ---------- Placeholder: Event ----------
+        event_y = 490
+        event_font = _font(26, bold=True)
+        event_label = "[event_name]"
+        bbox = draw.textbbox((0, 0), event_label, font=event_font)
+        ph_box_x1 = (width - (bbox[2] - bbox[0])) // 2 - ph_box_pad
+        ph_box_x2 = (width + (bbox[2] - bbox[0])) // 2 + ph_box_pad
+        ph_box_y1 = event_y - 8
+        ph_box_y2 = event_y + (bbox[3] - bbox[1]) + 8
+        draw.rounded_rectangle(
+            [(ph_box_x1, ph_box_y1), (ph_box_x2, ph_box_y2)],
+            radius=8,
+            fill=light_gray,
+            outline=primary,
+            width=2,
+        )
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, event_y),
+            event_label,
+            fill=primary,
+            font=event_font,
+        )
+
+        # ---------- Placeholder: Date ----------
+        date_font = _font(18)
+        date_label = "[date]"
+        bbox = draw.textbbox((0, 0), date_label, font=date_font)
+        ph_box_x1 = (width - (bbox[2] - bbox[0])) // 2 - 12
+        ph_box_x2 = (width + (bbox[2] - bbox[0])) // 2 + 12
+        ph_box_y1 = 555 - 6
+        ph_box_y2 = 555 + (bbox[3] - bbox[1]) + 6
+        draw.rounded_rectangle(
+            [(ph_box_x1, ph_box_y1), (ph_box_x2, ph_box_y2)],
+            radius=6,
+            fill=light_gray,
+            outline=primary,
+            width=1,
+        )
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, 555),
+            date_label,
+            fill=primary,
+            font=date_font,
+        )
+
+        # ---------- Footer ----------
+        footer_font = _font(14)
+        footer_text = "Presented by CertiGenius \u2022 Automated Certificate Platform"
+        bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
+        draw.text(
+            ((width - (bbox[2] - bbox[0])) // 2, height - 80),
+            footer_text,
+            fill=gray,
+            font=footer_font,
+        )
+
+        # ---------- Save to BytesIO ----------
+        output = io.BytesIO()
+        img.save(output, format="PNG")
+        output.seek(0)
+
+        return send_file(
+            output,
+            mimetype="image/png",
+            as_attachment=True,
+            download_name="sample_certificate_template.png",
+        )
+
+    # ---------- Sample Excel Download ----------
+
+    @app.route("/sample-excel")
+    def download_sample_excel():
+        """Generate and download a sample Excel file with participant data."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Participants"
+
+        # Headers
+        headers = ["Name", "Email", "Prize Position", "Event", "Date"]
+        ws.append(headers)
+
+        # Sample data
+        sample_data = [
+            ["John Doe", "john@example.com", "1st", "Annual Conference 2024", "2024-12-01"],
+            ["Jane Smith", "jane@example.com", "2nd", "Annual Conference 2024", "2024-12-01"],
+            ["Bob Johnson", "bob@example.com", "3rd", "Annual Conference 2024", "2024-12-01"],
+            ["Alice Brown", "alice@example.com", "Participation", "Annual Conference 2024", "2024-12-01"],
+            ["Charlie Wilson", "charlie@example.com", "1st", "Workshop Series 2024", "2024-11-15"],
+            ["Diana Garcia", "diana@example.com", "2nd", "Workshop Series 2024", "2024-11-15"],
+            ["Edward Lee", "edward@example.com", "Participation", "Hackathon Q4", "2024-10-20"],
+            ["Fiona Chen", "fiona@example.com", "1st", "Hackathon Q4", "2024-10-20"],
+        ]
+
+        for row in sample_data:
+            ws.append(row)
+
+        # Style headers
+        from openpyxl.styles import Font, PatternFill
+        header_fill = PatternFill(start_color="667EEA", end_color="667EEA", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True, size=11)
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+
+        # Auto-adjust column widths
+        for col in ws.columns:
+            max_length = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = max_length + 4
+
+        # Save to BytesIO
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        return send_file(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name="sample_participants.xlsx",
         )
 
     # ---------- API endpoints for AJAX ----------
