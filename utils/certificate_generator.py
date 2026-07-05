@@ -5,16 +5,10 @@ Supports PNG, JPG, and PDF templates.
 """
 
 import os
-import tempfile
-from io import BytesIO
-
 from collections import Counter
 
+import fitz  # PyMuPDF for PDF editing
 from PIL import Image, ImageDraw, ImageFont
-from reportlab.lib.pagesizes import landscape
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfgen import canvas
 
 from config import Config
 
@@ -265,50 +259,318 @@ def generate_from_pdf_template(
     template_path, output_path, data, placeholders=None
 ):
     """
-    Generate a certificate from a PDF template.
-    Since editing existing PDFs is complex, we create a new PDF
-    that matches the template layout with filled fields.
+    Generate a certificate from a PDF template using PyMuPDF (fitz).
+    Dynamically detects underscore placeholder positions by scanning text
+    spans, erases complete lines, and redraws them with filled values.
 
-    For production use, consider using a library like pdfrw or
-    PyMuPDF for direct PDF template editing.
+    Handles templates with these placeholder patterns:
+      - Name: large underscore text (script font, size > 50)
+      - Event: "for having [won Nth prize / participated] in ______"
+               followed by a continuation line of underscores
+      - Date: "held on ______ ."
     """
-    from reportlab.lib.pagesizes import letter, landscape
-    from reportlab.pdfgen import canvas
+    doc = fitz.open(template_path)
+    page = doc[0]
 
-    width, height = landscape(letter)
+    # --- Register the official Niconne-Regular font for participant name ---
+    script_font_name = "helv"
+    niconne_font = None
+    # Check both current directory and absolute path paths
+    for font_path in ["fonts/Niconne-Regular.ttf", os.path.join(Config.UPLOAD_FOLDER, "..", "fonts", "Niconne-Regular.ttf")]:
+        if os.path.exists(font_path):
+            try:
+                page.insert_font(fontname="Niconne", fontfile=font_path)
+                script_font_name = "Niconne"
+                niconne_font = fitz.Font(fontfile=font_path)
+                break
+            except Exception:
+                pass
 
-    c = canvas.Canvas(output_path, pagesize=landscape(letter))
+    # --- Register the official Montserrat-Regular font for body text ---
+    body_render_font = "helv"
+    montserrat_font = None
+    for font_path in ["fonts/Montserrat-Regular.ttf", os.path.join(Config.UPLOAD_FOLDER, "..", "fonts", "Montserrat-Regular.ttf")]:
+        if os.path.exists(font_path):
+            try:
+                page.insert_font(fontname="Montserrat", fontfile=font_path)
+                body_render_font = "Montserrat"
+                montserrat_font = fitz.Font(fontfile=font_path)
+                break
+            except Exception:
+                pass
 
-    # Try to embed the template as a background image
-    # For simple PDF templates, we draw text on a new page
-    fonts = _get_available_fonts()
+    def get_text_width(text, is_script=False, size=12):
+        """Measure text width using loaded TTF files, falling back to base-14 Helvetica."""
+        if is_script and niconne_font:
+            try:
+                return niconne_font.text_length(text, fontsize=size)
+            except Exception:
+                pass
+        elif not is_script and montserrat_font:
+            try:
+                return montserrat_font.text_length(text, fontsize=size)
+            except Exception:
+                pass
+        return fitz.get_text_length(text, fontname="helv", fontsize=size)
 
-    c.setFont("Helvetica", 16)
+    # --- Scan all text spans to locate placeholder fields dynamically ---
+    text_blocks = page.get_text(
+        "dict", flags=fitz.TEXT_PRESERVE_WHITESPACE
+    )["blocks"]
 
-    # Draw each field
-    center_x = width / 2
+    name_span = None          # Large underscore placeholder for participant name
+    event_line1_span = None   # "for having won Xth prize in ______..."
+    event_line2_span = None   # "______________________" continuation line
+    date_span = None          # "held on ______ ."
 
-    special_fields = {
-        "participant_name": {"y": height * 0.45, "size": 36},
-        "prize_position": {"y": height * 0.38, "size": 24},
-        "event_name": {"y": height * 0.31, "size": 20},
-    }
-
-    for field_name, value in data.items():
-        if not value:
+    for block in text_blocks:
+        if block["type"] != 0:
             continue
+        for line in block["lines"]:
+            for span in line["spans"]:
+                text = span["text"].strip()
+                if not text:
+                    continue
+                size = span["size"]
+                bbox_y0 = span["bbox"][1]
 
-        field_config = special_fields.get(
-            field_name.lower(), {"y": height * 0.25, "size": 16}
+                # Name placeholder: large font (>50pt), all underscores
+                if size > 50 and all(c == "_" for c in text):
+                    name_span = span
+
+                # Event line 1: starts with "for having"
+                elif text.lower().startswith("for having"):
+                    event_line1_span = span
+
+                # Event line 2: all underscores, body font size, below y=340
+                elif (
+                    all(c == "_" for c in text)
+                    and 12 <= size <= 15
+                    and bbox_y0 > 340
+                ):
+                    event_line2_span = span
+
+                # Date line: contains "held" and underscores
+                elif "held" in text.lower() and "_" in text:
+                    date_span = span
+
+    # --- Extract field values with flexible key matching ---
+    participant_name = (
+        data.get("participant_name")
+        or data.get("Participant Name")
+        or data.get("Name")
+        or data.get("name")
+        or ""
+    )
+
+    event_name = (
+        data.get("Event")
+        or data.get("event")
+        or data.get("event_name")
+        or data.get("Event Name")
+        or ""
+    )
+
+    date_val = data.get("Date") or data.get("date") or ""
+
+    body_fontsize = 13.1
+
+    # ---------- 1. Participant Name ----------
+    if participant_name and name_span:
+        name_str = str(participant_name).strip()
+        nb = name_span["bbox"]  # (x0, y0, x1, y1)
+
+        # Auto-size to fit within the placeholder width (with margin)
+        available_width = (nb[2] - nb[0]) - 40
+        name_font_size = 24  # fallback minimum
+        for test_size in [60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 18, 16]:
+            tw = get_text_width(name_str, is_script=True, size=test_size)
+            if tw <= available_width:
+                name_font_size = test_size
+                break
+
+        # Erase the full underscore area
+        page.draw_rect(
+            fitz.Rect(nb[0] - 5, nb[1] - 2, nb[2] + 5, nb[3] + 2),
+            color=(1, 1, 1),
+            fill=(1, 1, 1),
+            width=0,
+            overlay=True,
         )
 
-        c.setFont("Helvetica-Bold" if field_name.lower() == "participant_name" else "Helvetica", field_config.get("size", 16))
-        c.setFillColorRGB(0, 0, 0)
+        # Center the name horizontally; baseline at ~75% height for visual balance
+        est_w = get_text_width(name_str, is_script=True, size=name_font_size)
+        center_x = (nb[0] + nb[2]) / 2
+        name_x = center_x - est_w / 2
+        name_y = nb[1] + (nb[3] - nb[1]) * 0.75
 
-        text_width = c.stringWidth(str(value), "Helvetica-Bold" if field_name.lower() == "participant_name" else "Helvetica", field_config.get("size", 16))
-        c.drawString(center_x - text_width / 2, field_config.get("y", height * 0.25), str(value))
+        page.insert_text(
+            fitz.Point(name_x, name_y),
+            name_str,
+            fontname=script_font_name,
+            fontsize=name_font_size,
+            color=(0, 0, 0),
+        )
 
-    c.save()
+    # ---------- 2. Event Name ----------
+    if event_name and event_line1_span:
+        event_str = str(event_name).strip()
+        eb1 = event_line1_span["bbox"]
+        full_text_line1 = event_line1_span["text"]
+
+        # Extract the prefix (everything before underscores)
+        underscore_idx = full_text_line1.find("_")
+        if underscore_idx > 0:
+            prefix = full_text_line1[:underscore_idx]
+            # Ensure it ends with a space
+            if not prefix.endswith(" "):
+                prefix = prefix.rstrip() + " "
+        else:
+            prefix = ""
+
+        # Erase event line 1 completely (prefix + underscores)
+        page.draw_rect(
+            fitz.Rect(eb1[0] - 5, eb1[1] - 2, eb1[2] + 5, eb1[3] + 2),
+            color=(1, 1, 1),
+            fill=(1, 1, 1),
+            width=0,
+            overlay=True,
+        )
+
+        # Erase event line 2 completely
+        eb2 = None
+        if event_line2_span:
+            eb2 = event_line2_span["bbox"]
+            page.draw_rect(
+                fitz.Rect(eb2[0] - 5, eb2[1] - 2, eb2[2] + 5, eb2[3] + 2),
+                color=(1, 1, 1),
+                fill=(1, 1, 1),
+                width=0,
+                overlay=True,
+            )
+
+        # Determine text area boundaries from the widest span
+        line_left = min(eb1[0], eb2[0]) if eb2 else eb1[0]
+        line_right = max(eb1[2], eb2[2]) if eb2 else eb1[2]
+        max_line_width = line_right - line_left
+        text_area_center = (line_left + line_right) / 2
+
+        # Baseline for line 1 (near bottom of bbox)
+        baseline_y1 = eb1[3] - 3
+
+        # Build the combined text: prefix + event name
+        combined_text = prefix + event_str
+        combined_width = get_text_width(combined_text, is_script=False, size=body_fontsize)
+
+        if combined_width <= max_line_width:
+            # Everything fits on one line — center it
+            start_x = text_area_center - combined_width / 2
+            page.insert_text(
+                fitz.Point(start_x, baseline_y1),
+                combined_text,
+                fontname=body_render_font,
+                fontsize=body_fontsize,
+                color=(0, 0, 0),
+            )
+        else:
+            # Need two lines: prefix + some event words on line 1, rest on line 2
+            prefix_width = get_text_width(prefix, is_script=False, size=body_fontsize)
+
+            # Left-align line 1 at the original position
+            line1_start_x = line_left
+            event_start_x = line1_start_x + prefix_width
+            avail_for_event_l1 = line_right - event_start_x - 5
+
+            # Word-wrap the event name across lines
+            words = event_str.split()
+            line1_event = ""
+            line2_text = ""
+            for word in words:
+                test = f"{line1_event} {word}".strip()
+                w = get_text_width(test, is_script=False, size=body_fontsize)
+                if w <= avail_for_event_l1:
+                    line1_event = test
+                else:
+                    line2_text = f"{line2_text} {word}".strip()
+
+            if not line1_event and words:
+                line1_event = words[0]
+
+            # Draw prefix on line 1
+            page.insert_text(
+                fitz.Point(line1_start_x, baseline_y1),
+                prefix,
+                fontname=body_render_font,
+                fontsize=body_fontsize,
+                color=(0, 0, 0),
+            )
+
+            # Draw event part 1 after prefix on line 1
+            if line1_event:
+                page.insert_text(
+                    fitz.Point(event_start_x, baseline_y1),
+                    line1_event,
+                    fontname=body_render_font,
+                    fontsize=body_fontsize,
+                    color=(0, 0, 0),
+                )
+
+            # Draw event part 2 centered on line 2
+            if line2_text and eb2:
+                baseline_y2 = eb2[3] - 3
+                l2_w = get_text_width(line2_text, is_script=False, size=body_fontsize)
+                l2_x = text_area_center - l2_w / 2
+                page.insert_text(
+                    fitz.Point(l2_x, baseline_y2),
+                    line2_text,
+                    fontname=body_render_font,
+                    fontsize=body_fontsize,
+                    color=(0, 0, 0),
+                )
+
+    # ---------- 3. Date ----------
+    if date_val and date_span:
+        date_str = str(date_val).strip()
+        db = date_span["bbox"]
+        full_text = date_span["text"]
+
+        # Extract prefix (everything before underscores, e.g. "held on ")
+        underscore_idx = full_text.find("_")
+        if underscore_idx > 0:
+            prefix = full_text[:underscore_idx]
+        else:
+            prefix = "held on "
+
+        # Erase the entire date line and redraw with filled value
+        page.draw_rect(
+            fitz.Rect(db[0] - 5, db[1] - 2, db[2] + 5, db[3] + 2),
+            color=(1, 1, 1),
+            fill=(1, 1, 1),
+            width=0,
+            overlay=True,
+        )
+
+        # Rebuild the full date text: "held on [date] ."
+        full_date_text = f"{prefix}{date_str} ."
+        date_width = get_text_width(full_date_text, is_script=False, size=body_fontsize)
+        # Center on the same text area as the original
+        date_center_x = (db[0] + db[2]) / 2
+        date_x = date_center_x - date_width / 2
+        baseline_y = db[3] - 3
+
+        page.insert_text(
+            fitz.Point(date_x, baseline_y),
+            full_date_text,
+            fontname=body_render_font,
+            fontsize=body_fontsize,
+            color=(0, 0, 0),
+        )
+
+    # ---------- Save ----------
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    doc.save(output_path, garbage=4, deflate=True)
+    doc.close()
+
     return output_path
 
 
