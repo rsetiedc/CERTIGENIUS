@@ -398,17 +398,14 @@ def generate_from_pdf_template(
             overlay=True,
         )
 
-        # Center the name horizontally; baseline at ~75% height for visual balance
-        est_w = get_text_width(name_str, is_script=True, size=name_font_size)
-        center_x = (nb[0] + nb[2]) / 2
-        name_x = center_x - est_w / 2
-        name_y = nb[1] + (nb[3] - nb[1]) * 0.75
-
-        page.insert_text(
-            fitz.Point(name_x, name_y),
+        # Center the name horizontally within the placeholder's bounding box using insert_textbox
+        rect = fitz.Rect(nb[0], nb[1] - 15, nb[2], nb[3] + 15)
+        page.insert_textbox(
+            rect,
             name_str,
             fontname=script_font_name,
             fontsize=name_font_size,
+            align=1,  # fitz.TEXT_ALIGN_CENTER
             color=(0, 0, 0),
         )
 
@@ -455,78 +452,22 @@ def generate_from_pdf_template(
         max_line_width = line_right - line_left
         text_area_center = (line_left + line_right) / 2
 
-        # Baseline for line 1 (near bottom of bbox)
-        baseline_y1 = eb1[3] - 3
-
         # Build the combined text: prefix + event name
         combined_text = prefix + event_str
-        combined_width = get_text_width(combined_text, is_script=False, size=body_fontsize)
-
-        if combined_width <= max_line_width:
-            # Everything fits on one line — center it
-            start_x = text_area_center - combined_width / 2
-            page.insert_text(
-                fitz.Point(start_x, baseline_y1),
-                combined_text,
-                fontname=body_render_font,
-                fontsize=body_fontsize,
-                color=(0, 0, 0),
-            )
-        else:
-            # Need two lines: prefix + some event words on line 1, rest on line 2
-            prefix_width = get_text_width(prefix, is_script=False, size=body_fontsize)
-
-            # Left-align line 1 at the original position
-            line1_start_x = line_left
-            event_start_x = line1_start_x + prefix_width
-            avail_for_event_l1 = line_right - event_start_x - 5
-
-            # Word-wrap the event name across lines
-            words = event_str.split()
-            line1_event = ""
-            line2_text = ""
-            for word in words:
-                test = f"{line1_event} {word}".strip()
-                w = get_text_width(test, is_script=False, size=body_fontsize)
-                if w <= avail_for_event_l1:
-                    line1_event = test
-                else:
-                    line2_text = f"{line2_text} {word}".strip()
-
-            if not line1_event and words:
-                line1_event = words[0]
-
-            # Draw prefix on line 1
-            page.insert_text(
-                fitz.Point(line1_start_x, baseline_y1),
-                prefix,
-                fontname=body_render_font,
-                fontsize=body_fontsize,
-                color=(0, 0, 0),
-            )
-
-            # Draw event part 1 after prefix on line 1
-            if line1_event:
-                page.insert_text(
-                    fitz.Point(event_start_x, baseline_y1),
-                    line1_event,
-                    fontname=body_render_font,
-                    fontsize=body_fontsize,
-                    color=(0, 0, 0),
-                )
-
-            # Draw event part 2 centered on line 2
-            if line2_text and eb2:
-                baseline_y2 = eb2[3] - 3
-                l2_w = get_text_width(line2_text, is_script=False, size=body_fontsize)
-                l2_x = text_area_center - l2_w / 2
-                page.insert_text(
-                    fitz.Point(l2_x, baseline_y2),
-                    line2_text,
-                    fontname=body_render_font,
-                    fontsize=body_fontsize,
-                    color=(0, 0, 0),
-                )
+        
+        # Determine a bounding box spanning from line 1 to line 2 (if present)
+        top_y = eb1[1] - 5
+        bottom_y = eb2[3] + 5 if eb2 else eb1[3] + 15
+        rect = fitz.Rect(line_left, top_y, line_right, bottom_y)
+        
+        page.insert_textbox(
+            rect,
+            combined_text,
+            fontname=body_render_font,
+            fontsize=body_fontsize,
+            align=1,  # fitz.TEXT_ALIGN_CENTER
+            color=(0, 0, 0),
+        )
 
     # ---------- 3. Date ----------
     if date_val and date_span:
@@ -552,17 +493,13 @@ def generate_from_pdf_template(
 
         # Rebuild the full date text: "held on [date] ."
         full_date_text = f"{prefix}{date_str} ."
-        date_width = get_text_width(full_date_text, is_script=False, size=body_fontsize)
-        # Center on the same text area as the original
-        date_center_x = (db[0] + db[2]) / 2
-        date_x = date_center_x - date_width / 2
-        baseline_y = db[3] - 3
-
-        page.insert_text(
-            fitz.Point(date_x, baseline_y),
+        rect = fitz.Rect(db[0], db[1] - 5, db[2], db[3] + 15)
+        page.insert_textbox(
+            rect,
             full_date_text,
             fontname=body_render_font,
             fontsize=body_fontsize,
+            align=1,  # fitz.TEXT_ALIGN_CENTER
             color=(0, 0, 0),
         )
 

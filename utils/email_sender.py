@@ -3,12 +3,14 @@ Email sender module for distributing certificates via Gmail SMTP.
 Uses Gmail's SMTP server with App Passwords for authentication.
 """
 
+import html
 import logging
 import smtplib
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formataddr
+from email.utils import formataddr, formatdate
+from uuid import uuid4
 
 from config import Config
 
@@ -139,6 +141,32 @@ class EmailSender:
         """Check if Gmail SMTP credentials are configured."""
         return bool(self.username and self.password and self.sender)
 
+    def connect(self):
+        """Establish a reusable SMTP connection for bulk sending."""
+        if not self.is_configured():
+            return False, "Not configured"
+        try:
+            self.server_conn = smtplib.SMTP(self.server, self.port, timeout=30)
+            if self.use_tls:
+                self.server_conn.ehlo()
+                self.server_conn.starttls()
+                self.server_conn.ehlo()
+            self.server_conn.login(self.username, self.password)
+            return True, "Connected"
+        except Exception as e:
+            logger.error(f"SMTP connect error: {e}")
+            self.server_conn = None
+            return False, str(e)
+
+    def disconnect(self):
+        """Close the reusable SMTP connection."""
+        if hasattr(self, "server_conn") and self.server_conn:
+            try:
+                self.server_conn.quit()
+            except Exception:
+                pass
+            self.server_conn = None
+
     def send_certificate(
         self, recipient_name, recipient_email, certificate_path,
         prize_position="Participation", event_name=""
@@ -169,37 +197,48 @@ class EmailSender:
             msg["From"] = formataddr(("CertiGenius", self.sender))
             msg["To"] = recipient_email
             msg["Subject"] = f"\U0001f389 Your Certificate - {prize_position}"
+            msg["Date"] = formatdate(localtime=True)
+            msg["Message-ID"] = f"<{uuid4().hex}@certigenius>"
 
-            # HTML body
+            # HTML body with escaped dynamic values
+            safe_name = html.escape(recipient_name)
+            safe_prize = html.escape(prize_position)
+            safe_event = html.escape(event_name or "Event")
             html_body = EMAIL_TEMPLATE.format(
-                name=recipient_name,
-                prize_position=prize_position,
-                event_name=event_name or "Event",
+                name=safe_name,
+                prize_position=safe_prize,
+                event_name=safe_event,
             )
-            msg.attach(MIMEText(html_body, "html"))
+            msg.attach(MIMEText(html_body, "html", "utf-8"))
 
             # Attach certificate PDF
+            safe_filename = f"certificate_{recipient_name.replace(' ', '_')}.pdf"
+            # Ensure the filename is ASCII-only for maximum compatibility
+            safe_filename = safe_filename.encode("ascii", "replace").decode("ascii")
             with open(certificate_path, "rb") as f:
                 attachment = MIMEApplication(f.read(), _subtype="pdf")
                 attachment.add_header(
                     "Content-Disposition",
                     "attachment",
-                    filename=f"certificate_{recipient_name.replace(' ', '_')}.pdf",
+                    filename=safe_filename,
                 )
                 msg.attach(attachment)
 
-            # Connect to Gmail SMTP and send
-            if self.use_tls:
-                server = smtplib.SMTP(self.server, self.port, timeout=30)
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
+            # Send using reusable connection if available, otherwise one-off
+            if hasattr(self, "server_conn") and self.server_conn:
+                self.server_conn.send_message(msg)
             else:
-                server = smtplib.SMTP(self.server, self.port, timeout=30)
+                if self.use_tls:
+                    server = smtplib.SMTP(self.server, self.port, timeout=30)
+                    server.ehlo()
+                    server.starttls()
+                    server.ehlo()
+                else:
+                    server = smtplib.SMTP(self.server, self.port, timeout=30)
 
-            server.login(self.username, self.password)
-            server.send_message(msg)
-            server.quit()
+                server.login(self.username, self.password)
+                server.send_message(msg)
+                server.quit()
 
             logger.info(f"Certificate sent successfully to {recipient_email}")
             return True, "Sent successfully"

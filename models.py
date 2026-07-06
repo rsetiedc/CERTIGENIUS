@@ -6,6 +6,77 @@ from flask_sqlalchemy import SQLAlchemy
 db = SQLAlchemy()
 
 
+class TemplateGroup(db.Model):
+    """A group of certificate templates, one per prize position."""
+    __tablename__ = "template_groups"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, default="")
+    created_at = db.Column(
+        db.DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    is_deleted = db.Column(db.Boolean, default=False)
+
+    # Relationships
+    templates = db.relationship(
+        "Template", backref="group", lazy="dynamic", cascade="all, delete-orphan"
+    )
+    batches = db.relationship(
+        "CertificateBatch", backref="template_group", lazy="dynamic"
+    )
+
+    def get_template_for_position(self, position):
+        """Return the Template matching a prize position, with fallback."""
+        if not position:
+            position = "Participation"
+        norm = _normalize_position(position)
+        for t in self.templates.filter_by(is_deleted=False).all():
+            if _normalize_position(t.position_label) == norm:
+                return t
+        # Fallback: try participation template
+        for t in self.templates.filter_by(is_deleted=False).all():
+            if _normalize_position(t.position_label) == "participation":
+                return t
+        # Last resort: first template in the group
+        return self.templates.filter_by(is_deleted=False).first()
+
+    def to_dict(self):
+        templates_list = [t.to_dict() for t in self.templates.filter_by(is_deleted=False).all()]
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "templates": templates_list,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+def _normalize_position(pos):
+    """Normalize a prize position string for matching.
+    
+    Maps common variants to canonical forms:
+    '1st', '1st prize', 'first', 'first prize' -> '1st'
+    '2nd', '2nd prize', 'second' -> '2nd'
+    '3rd', '3rd prize', 'third' -> '3rd'
+    Everything else -> lowercase stripped
+    """
+    if not pos:
+        return "participation"
+    s = pos.strip().lower().replace("_", " ").replace("-", " ")
+    # Remove trailing "prize" / "place"
+    for suffix in (" prize", " place", " position"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)].strip()
+    mapping = {
+        "1st": "1st", "first": "1st", "1": "1st",
+        "2nd": "2nd", "second": "2nd", "2": "2nd",
+        "3rd": "3rd", "third": "3rd", "3": "3rd",
+        "participation": "participation", "participant": "participation",
+    }
+    return mapping.get(s, s)
+
+
 class Template(db.Model):
     __tablename__ = "templates"
 
@@ -14,9 +85,11 @@ class Template(db.Model):
     description = db.Column(db.Text, default="")
     file_path = db.Column(db.String(500), nullable=False)
     file_type = db.Column(db.String(10), nullable=False)  # png, jpg, pdf
+    position_label = db.Column(db.String(50), default="Participation")  # 1st, 2nd, 3rd, Participation
     placeholder_fields = db.Column(db.Text, default="[]")  # JSON array of field names
     width = db.Column(db.Integer, default=1200)
     height = db.Column(db.Integer, default=800)
+    group_id = db.Column(db.Integer, db.ForeignKey("template_groups.id"), nullable=True)
     created_at = db.Column(
         db.DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -28,9 +101,6 @@ class Template(db.Model):
     is_deleted = db.Column(db.Boolean, default=False)
 
     # Relationships
-    batches = db.relationship(
-        "CertificateBatch", backref="template", lazy="dynamic"
-    )
     certificates = db.relationship(
         "Certificate", backref="template", lazy="dynamic"
     )
@@ -48,9 +118,11 @@ class Template(db.Model):
             "description": self.description,
             "file_path": self.file_path,
             "file_type": self.file_type,
+            "position_label": self.position_label,
             "placeholder_fields": self.get_placeholders(),
             "width": self.width,
             "height": self.height,
+            "group_id": self.group_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -95,7 +167,7 @@ class CertificateBatch(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
-    template_id = db.Column(db.Integer, db.ForeignKey("templates.id"), nullable=False)
+    template_group_id = db.Column(db.Integer, db.ForeignKey("template_groups.id"), nullable=True)
     status = db.Column(
         db.String(20), default="pending"
     )  # pending, generating, generated, distributing, completed, failed
@@ -121,8 +193,8 @@ class CertificateBatch(db.Model):
         return {
             "id": self.id,
             "name": self.name,
-            "template_id": self.template_id,
-            "template_name": self.template.name if self.template else "Unknown",
+            "template_group_id": self.template_group_id,
+            "template_group_name": self.template_group.name if self.template_group else "Unknown",
             "status": self.status,
             "total_count": self.total_count,
             "generated_count": self.generated_count,

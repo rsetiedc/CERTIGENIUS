@@ -134,10 +134,10 @@
                             </span>
                         </td>
                     </tr>
-                    {% if batch.template %}
+                    {% if batch.template_group %}
                     <tr>
-                        <td class="text-muted">Template</td>
-                        <td>{{ batch.template.name }}</td>
+                        <td class="text-muted">Template Group</td>
+                        <td>{{ batch.template_group.name }}</td>
                     </tr>
                     {% endif %}
                     <tr>
@@ -309,7 +309,6 @@
     </div>
 </div>
 {% endif %}
-{% endblock %}
 
 <!-- Distribute Modal -->
 <div class="modal fade" id="distributeModal" tabindex="-1">
@@ -332,7 +331,7 @@
                             <i class="bi bi-envelope me-1"></i>Sender Email
                         </label>
                         <input type="email" class="form-control" name="sender_email"
-                               value="{{ config.get('MAIL_DEFAULT_SENDER', 'rg05.koickal@gmail.com') }}"
+                               value="rg05.koickal@gmail.com"
                                placeholder="your-email@gmail.com">
                         <div class="form-text">
                             The email address that will appear as the sender. 
@@ -355,6 +354,8 @@
         </div>
     </div>
 </div>
+
+{% endblock %}
 
 {% block extra_scripts %}
 <script>

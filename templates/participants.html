@@ -22,14 +22,14 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Associate Template (optional)</label>
-                        <select class="form-select" name="template_id">
-                            <option value="">— No template selected —</option>
-                            {% for t in templates %}
-                            <option value="{{ t.id }}">{{ t.name }}</option>
+                        <label class="form-label">Associate Template Group (optional)</label>
+                        <select class="form-select" name="template_group_id">
+                            <option value="">— No template group selected —</option>
+                            {% for g in template_groups %}
+                            <option value="{{ g.id }}">{{ g.name }} ({{ g.templates.filter_by(is_deleted=False).count() }} templates)</option>
                             {% endfor %}
                         </select>
-                        <div class="form-text">Pre-select a template for this batch.</div>
+                        <div class="form-text">Pre-select a template group for this batch. Each participant gets the certificate matching their prize position.</div>
                     </div>
 
                     <div class="mb-3">

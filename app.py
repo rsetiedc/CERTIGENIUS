@@ -6,6 +6,7 @@ Main Flask application.
 import json
 import logging
 import os
+import re
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from flask import (
 )
 
 from config import Config
-from models import Certificate, CertificateBatch, Participant, Template, db
+from models import Certificate, CertificateBatch, Participant, Template, TemplateGroup, db
 import io
 
 import openpyxl
@@ -37,6 +38,28 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _detect_position_from_filename(filename):
+    """Detect a prize position from a filename.
+
+    Examples:
+        '1st_prize.pdf'   -> '1st'
+        '2nd_prize.pdf'   -> '2nd'
+        '3rd_prize.pdf'   -> '3rd'
+        'participation.pdf' -> 'Participation'
+        'first_place.pdf' -> '1st'
+    """
+    name = os.path.splitext(filename)[0].lower().replace("-", " ").replace("_", " ")
+    if re.search(r'\b1st\b|first', name):
+        return "1st"
+    if re.search(r'\b2nd\b|second', name):
+        return "2nd"
+    if re.search(r'\b3rd\b|third', name):
+        return "3rd"
+    if re.search(r'particip', name):
+        return "Participation"
+    return "Participation"
 
 
 def create_app():
@@ -73,7 +96,7 @@ def register_routes(app):
     # ---------- Dashboard ----------
     @app.route("/")
     def dashboard():
-        template_count = Template.query.filter_by(is_deleted=False).count()
+        template_count = TemplateGroup.query.filter_by(is_deleted=False).count()
         participant_count = Participant.query.count()
         batch_count = CertificateBatch.query.count()
         certificate_count = Certificate.query.count()
@@ -99,37 +122,23 @@ def register_routes(app):
 
     @app.route("/templates")
     def templates():
-        all_templates = (
-            Template.query.filter_by(is_deleted=False)
-            .order_by(Template.created_at.desc())
+        all_groups = (
+            TemplateGroup.query.filter_by(is_deleted=False)
+            .order_by(TemplateGroup.created_at.desc())
             .all()
         )
-        return render_template("templates.html", templates=all_templates)
+        return render_template("templates.html", template_groups=all_groups)
 
     @app.route("/templates/upload", methods=["POST"])
     def upload_template():
-        if "template_file" not in request.files:
-            flash("No file selected", "error")
-            return redirect(url_for("templates"))
-
-        file = request.files["template_file"]
-        if file.filename == "":
-            flash("No file selected", "error")
+        files = request.files.getlist("template_files")
+        if not files or all(f.filename == "" for f in files):
+            flash("No files selected", "error")
             return redirect(url_for("templates"))
 
         name = request.form.get("name", "").strip()
         if not name:
-            name = os.path.splitext(file.filename)[0]
-
-        # Validate file type
-        allowed_extensions = {".png", ".jpg", ".jpeg", ".pdf"}
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in allowed_extensions:
-            flash(
-                f"Unsupported file format: {ext}. Allowed: PNG, JPG, JPEG, PDF",
-                "error",
-            )
-            return redirect(url_for("templates"))
+            name = f"Template Group {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 
         # Parse placeholder fields from form
         placeholder_fields_str = request.form.get("placeholder_fields", "")
@@ -139,46 +148,84 @@ def register_routes(app):
                 f.strip() for f in placeholder_fields_str.split(",") if f.strip()
             ]
 
-        # Save file
-        filename = f"{uuid.uuid4().hex}{ext}"
+        # Validate all files
+        allowed_extensions = {".png", ".jpg", ".jpeg", ".pdf"}
+        for file in files:
+            ext = os.path.splitext(file.filename)[1].lower()
+            if ext not in allowed_extensions:
+                flash(
+                    f"Unsupported file format: {file.filename}. Allowed: PNG, JPG, JPEG, PDF",
+                    "error",
+                )
+                return redirect(url_for("templates"))
+
+        # Create template group
+        group = TemplateGroup(
+            name=name,
+            description=request.form.get("description", ""),
+        )
+        db.session.add(group)
+        db.session.flush()  # get group.id
+
         upload_dir = os.path.join(
             app.root_path, Config.UPLOAD_FOLDER, "templates"
         )
-        file_path = os.path.join(upload_dir, filename)
-        file.save(file_path)
 
-        template = Template(
-            name=name,
-            description=request.form.get("description", ""),
-            file_path=os.path.join(Config.UPLOAD_FOLDER, "templates", filename),
-            file_type=ext[1:],  # Remove the dot
+        positions_added = []
+        for file in files:
+            if file.filename == "":
+                continue
+            ext = os.path.splitext(file.filename)[1].lower()
+            position_label = _detect_position_from_filename(file.filename)
+
+            # Save file
+            filename = f"{uuid.uuid4().hex}{ext}"
+            file_path = os.path.join(upload_dir, filename)
+            file.save(file_path)
+
+            template = Template(
+                name=f"{name} - {position_label}",
+                description=request.form.get("description", ""),
+                file_path=os.path.join(Config.UPLOAD_FOLDER, "templates", filename),
+                file_type=ext[1:],  # Remove the dot
+                position_label=position_label,
+                group_id=group.id,
+            )
+            template.set_placeholders(placeholder_fields)
+            db.session.add(template)
+            positions_added.append(position_label)
+
+        db.session.commit()
+
+        positions_str = ", ".join(positions_added) if positions_added else "none"
+        flash(
+            f'Template group "{name}" uploaded with {len(positions_added)} template(s): {positions_str}',
+            "success",
         )
-        template.set_placeholders(placeholder_fields)
-
-        db.session.add(template)
-        db.session.commit()
-
-        flash(f'Template "{name}" uploaded successfully!', "success")
         return redirect(url_for("templates"))
 
-    @app.route("/templates/<int:template_id>/delete", methods=["POST"])
-    def delete_template(template_id):
-        template = Template.query.get_or_404(template_id)
-        template.is_deleted = True
+    @app.route("/templates/<int:group_id>/delete", methods=["POST"])
+    def delete_template(group_id):
+        group = TemplateGroup.query.get_or_404(group_id)
+        group.is_deleted = True
+        # Also soft-delete child templates
+        for t in group.templates.all():
+            t.is_deleted = True
         db.session.commit()
 
-        flash(f'Template "{template.name}" deleted.', "success")
+        flash(f'Template group "{group.name}" deleted.', "success")
         return redirect(url_for("templates"))
 
-    @app.route("/templates/<int:template_id>")
-    def template_detail(template_id):
-        template = Template.query.get_or_404(template_id)
-        return render_template("template_detail.html", template=template)
+    @app.route("/templates/<int:group_id>")
+    def template_detail(group_id):
+        group = TemplateGroup.query.get_or_404(group_id)
+        child_templates = group.templates.filter_by(is_deleted=False).all()
+        return render_template("template_detail.html", group=group, templates=child_templates)
 
-    @app.route("/api/templates/<int:template_id>")
-    def api_template(template_id):
-        template = Template.query.get_or_404(template_id)
-        return jsonify(template.to_dict())
+    @app.route("/api/templates/<int:group_id>")
+    def api_template(group_id):
+        group = TemplateGroup.query.get_or_404(group_id)
+        return jsonify(group.to_dict())
 
     # ---------- Participant Data Management ----------
 
@@ -187,11 +234,11 @@ def register_routes(app):
         batches = (
             CertificateBatch.query.order_by(CertificateBatch.created_at.desc()).all()
         )
-        templates_list = (
-            Template.query.filter_by(is_deleted=False).all()
+        template_groups = (
+            TemplateGroup.query.filter_by(is_deleted=False).all()
         )
         return render_template(
-            "participants.html", batches=batches, templates=templates_list
+            "participants.html", batches=batches, template_groups=template_groups
         )
 
     @app.route("/participants/upload", methods=["POST"])
@@ -209,7 +256,7 @@ def register_routes(app):
         if not batch_name:
             batch_name = f"Batch {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 
-        template_id = request.form.get("template_id", type=int)
+        template_group_id = request.form.get("template_group_id", type=int)
 
         # Validate file type
         allowed_extensions = {".csv", ".xlsx", ".xls"}
@@ -240,7 +287,7 @@ def register_routes(app):
         # Create batch and store participants
         batch = CertificateBatch(
             name=batch_name,
-            template_id=template_id,
+            template_group_id=template_group_id,
             status="pending",
             total_count=0,
         )
@@ -319,18 +366,13 @@ def register_routes(app):
     def generate_certificates(batch_id):
         batch = CertificateBatch.query.get_or_404(batch_id)
 
-        if not batch.template_id:
-            flash("No template assigned to this batch.", "error")
+        if not batch.template_group_id:
+            flash("No template group assigned to this batch.", "error")
             return redirect(url_for("batch_detail", batch_id=batch_id))
 
-        template = Template.query.get(batch.template_id)
-        if not template or template.is_deleted:
-            flash("Assigned template not found or has been deleted.", "error")
-            return redirect(url_for("batch_detail", batch_id=batch_id))
-
-        template_path = os.path.join(app.root_path, template.file_path)
-        if not os.path.exists(template_path):
-            flash("Template file not found on disk.", "error")
+        group = TemplateGroup.query.get(batch.template_group_id)
+        if not group or group.is_deleted:
+            flash("Assigned template group not found or has been deleted.", "error")
             return redirect(url_for("batch_detail", batch_id=batch_id))
 
         # Update batch status
@@ -338,7 +380,6 @@ def register_routes(app):
         db.session.commit()
 
         participants = batch.participants.all()
-        placeholders = template.get_placeholders()
         generated_count = 0
         failed_count = 0
 
@@ -349,15 +390,49 @@ def register_routes(app):
 
         for participant in participants:
             try:
+                # Find the correct template for this participant's position
+                template = group.get_template_for_position(participant.prize_position)
+                if not template:
+                    raise ValueError(f"No template found for position: {participant.prize_position}")
+
+                template_path = os.path.join(app.root_path, template.file_path)
+                if not os.path.exists(template_path):
+                    raise FileNotFoundError(f"Template file not found: {template_path}")
+
+                placeholders = template.get_placeholders()
+
                 # Prepare data for the certificate
+                extra = participant.get_extra_data()
                 data = {
                     "participant_name": participant.name,
                     "email": participant.email,
                     "prize_position": participant.prize_position,
                 }
 
-                # Add extra data fields
-                extra = participant.get_extra_data()
+                # Pull event_name and date from extra_data columns
+                # Try common column names for event
+                event_name = (
+                    extra.get("Event")
+                    or extra.get("event")
+                    or extra.get("Event Name")
+                    or extra.get("event_name")
+                    or batch.name  # fallback to batch name
+                )
+                data["event_name"] = event_name
+                data["Event"] = event_name
+
+                # Try common column names for date
+                date_val = (
+                    extra.get("Date")
+                    or extra.get("date")
+                    or extra.get("Event Date")
+                    or extra.get("event_date")
+                    or ""
+                )
+                data["date"] = date_val
+                data["Date"] = date_val
+
+                # Add all other extra data
                 data.update(extra)
 
                 # If placeholders are defined, only include those fields
@@ -394,6 +469,7 @@ def register_routes(app):
 
                 if existing_cert:
                     existing_cert.file_path = relative_path
+                    existing_cert.template_id = template.id
                     existing_cert.status = "generated"
                     existing_cert.error_message = ""
                 else:
@@ -420,19 +496,23 @@ def register_routes(app):
                     existing_cert.status = "failed"
                     existing_cert.error_message = str(e)
                 else:
+                    # Use first available template id for error records
+                    fallback_template = group.templates.first()
                     cert = Certificate(
                         batch_id=batch.id,
                         participant_id=participant.id,
-                        template_id=template.id,
+                        template_id=fallback_template.id if fallback_template else 0,
                         status="failed",
                         error_message=str(e),
                     )
                     db.session.add(cert)
 
-        # Update batch
+        # Update batch — reset sent_count since certificates are freshly generated
         batch.generated_count = generated_count
+        batch.sent_count = 0
         batch.failed_count = failed_count
         batch.status = "generated" if failed_count == 0 else "completed" if generated_count > 0 else "failed"
+        batch.error_message = ""
 
         if failed_count > 0 and generated_count > 0:
             batch.status = "completed"
@@ -472,69 +552,111 @@ def register_routes(app):
         batch.status = "distributing"
         db.session.commit()
 
-        sent_count = 0
-        failed_count = 0
-        event_name = batch.name
+        # Run distribution in a background thread
+        import threading
+        
+        def _run_distribution(app_context, batch_id_val, sender_email_val, cert_ids):
+            with app_context:
+                from models import CertificateBatch, Certificate, db
+                from utils.email_sender import EmailSender
+                import os
+                from datetime import datetime, timezone
 
-        for cert in certificates:
-            try:
-                participant = cert.participant
-                if not participant:
-                    cert.status = "failed"
-                    cert.error_message = "Participant not found"
-                    failed_count += 1
-                    continue
+                batch = CertificateBatch.query.get(batch_id_val)
+                if not batch:
+                    return
 
-                cert_path = os.path.join(app.root_path, cert.file_path) if cert.file_path else ""
-                if not cert_path or not os.path.exists(cert_path):
-                    cert.status = "failed"
-                    cert.error_message = "Certificate file not found"
-                    failed_count += 1
-                    continue
+                email_sender = EmailSender(sender_email=sender_email_val if sender_email_val else None)
+                email_sender.connect()
 
-                success, message = email_sender.send_certificate(
-                    recipient_name=participant.name,
-                    recipient_email=participant.email,
-                    certificate_path=cert_path,
-                    prize_position=participant.prize_position,
-                    event_name=event_name,
-                )
+                sent_count = 0
+                failed_count = 0
 
-                if success:
-                    cert.status = "sent"
-                    cert.sent_at = datetime.now(timezone.utc)
-                    sent_count += 1
+                for cid in cert_ids:
+                    cert = Certificate.query.get(cid)
+                    if not cert:
+                        continue
+                    try:
+                        participant = cert.participant
+                        if not participant:
+                            cert.status = "failed"
+                            cert.error_message = "Participant not found"
+                            failed_count += 1
+                            continue
+
+                        cert_path = os.path.join(app.root_path, cert.file_path) if cert.file_path else ""
+                        if not cert_path or not os.path.exists(cert_path):
+                            cert.status = "failed"
+                            cert.error_message = "Certificate file not found"
+                            failed_count += 1
+                            continue
+
+                        # Get event name from participant's extra data
+                        extra = participant.get_extra_data()
+                        event_name = (
+                            extra.get("Event")
+                            or extra.get("event")
+                            or extra.get("Event Name")
+                            or extra.get("event_name")
+                            or batch.name
+                        )
+
+                        success, message = email_sender.send_certificate(
+                            recipient_name=participant.name,
+                            recipient_email=participant.email,
+                            certificate_path=cert_path,
+                            prize_position=participant.prize_position,
+                            event_name=event_name,
+                        )
+
+                        if success:
+                            cert.status = "sent"
+                            cert.sent_at = datetime.now(timezone.utc)
+                            sent_count += 1
+                        else:
+                            cert.status = "failed"
+                            cert.error_message = message
+                            failed_count += 1
+
+                    except Exception as e:
+                        logger.exception(f"Error distributing certificate ID {cert.id}")
+                        cert.status = "failed"
+                        cert.error_message = str(e)
+                        failed_count += 1
+                        
+                    # Commit progress per certificate to show live updates
+                    db.session.commit()
+
+                email_sender.disconnect()
+
+                # Final update on batch
+                batch.sent_count = sent_count
+                batch.failed_count = (batch.failed_count or 0) + failed_count
+
+                if failed_count == 0:
+                    batch.status = "completed"
+                    batch.completed_at = datetime.now(timezone.utc)
+                elif sent_count > 0:
+                    batch.status = "completed"
+                    batch.completed_at = datetime.now(timezone.utc)
+                    batch.error_message = f"{sent_count} sent, {failed_count} failed"
                 else:
-                    cert.status = "failed"
-                    cert.error_message = message
-                    failed_count += 1
+                    batch.status = "failed"
+                    batch.error_message = f"All {failed_count} emails failed"
 
-            except Exception as e:
-                logger.exception(f"Error distributing certificate ID {cert.id}")
-                cert.status = "failed"
-                cert.error_message = str(e)
-                failed_count += 1
+                db.session.commit()
 
-        # Update batch
-        batch.sent_count = sent_count
-        batch.failed_count = (batch.failed_count or 0) + failed_count
-
-        if failed_count == 0:
-            batch.status = "completed"
-            batch.completed_at = datetime.now(timezone.utc)
-        elif sent_count > 0:
-            batch.status = "completed"
-            batch.completed_at = datetime.now(timezone.utc)
-            batch.error_message = f"{sent_count} sent, {failed_count} failed"
-        else:
-            batch.status = "failed"
-            batch.error_message = f"All {failed_count} emails failed"
-
-        db.session.commit()
+        cert_ids = [c.id for c in certificates]
+        thread = threading.Thread(
+            target=_run_distribution,
+            args=(app.app_context(), batch.id, sender_email, cert_ids)
+        )
+        thread.daemon = True
+        thread.start()
 
         flash(
-            f"Distributed {sent_count} certificates via email. {failed_count} failed.",
-            "success" if failed_count == 0 else "warning",
+            f"Email distribution for {len(certificates)} certificates has started in the background. The page will auto-refresh.",
+            "info"
         )
         return redirect(url_for("batch_detail", batch_id=batch_id))
 
@@ -666,7 +788,6 @@ def register_routes(app):
         name_font = _font(48, bold=True)
         name_label = "[participant_name]"
         bbox = draw.textbbox((0, 0), name_label, font=name_font)
-        # Highlighted background box for the placeholder
         ph_box_pad = 20
         ph_box_x1 = (width - (bbox[2] - bbox[0])) // 2 - ph_box_pad
         ph_box_x2 = (width + (bbox[2] - bbox[0])) // 2 + ph_box_pad

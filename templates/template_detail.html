@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Template: {{ template.name }}{% endblock %}
+{% block title %}Template Group: {{ group.name }}{% endblock %}
 
 {% block content %}
 <div class="page-header d-flex justify-content-between align-items-center">
@@ -7,106 +7,98 @@
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="{{ url_for('templates') }}" class="text-decoration-none">Templates</a></li>
-                <li class="breadcrumb-item active">{{ template.name }}</li>
+                <li class="breadcrumb-item active">{{ group.name }}</li>
             </ol>
         </nav>
-        <h1><i class="bi bi-files me-2" style="color: var(--primary);"></i>{{ template.name }}</h1>
+        <h1><i class="bi bi-layers me-2" style="color: var(--primary);"></i>{{ group.name }}</h1>
     </div>
     <div>
-        <form action="{{ url_for('delete_template', template_id=template.id) }}" method="POST"
-              onsubmit="return confirm('Delete this template? This cannot be undone.');"
+        <form action="{{ url_for('delete_template', group_id=group.id) }}" method="POST"
+              onsubmit="return confirm('Delete this template group? This cannot be undone.');"
               class="d-inline">
             <button type="submit" class="btn btn-outline-danger">
-                <i class="bi bi-trash me-1"></i>Delete
+                <i class="bi bi-trash me-1"></i>Delete Group
             </button>
         </form>
     </div>
 </div>
 
-<div class="row g-4">
-    <div class="col-md-8">
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-image me-2" style="color: var(--primary);"></i>Template Preview
+                <i class="bi bi-info-circle me-2" style="color: var(--primary);"></i>Group Info
             </div>
-            <div class="card-body text-center">
-                {% if template.file_type in ('png', 'jpg', 'jpeg') %}
-                <div class="d-flex align-items-center justify-content-center" style="height: 300px; background: #f8f8f8; border-radius: 8px;">
-                    <div class="text-center">
-                        <i class="bi bi-filetype-{{ 'png' if template.file_type == 'png' else 'jpg' }}" style="font-size: 4rem; color: var(--primary);"></i>
-                        <p class="mt-2 text-muted">{{ template.file_type|upper }} Template</p>
-                        <p class="small text-muted">Preview available after certificate generation</p>
-                    </div>
-                </div>
-                {% else %}
-                <div class="d-flex align-items-center justify-content-center" style="height: 300px; background: #f8f8f8; border-radius: 8px;">
-                    <div class="text-center">
-                        <i class="bi bi-filetype-pdf" style="font-size: 4rem; color: #dc2626;"></i>
-                        <p class="mt-2 text-muted">PDF Template</p>
-                        <p class="small text-muted">Preview not available for PDF files</p>
-                    </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr>
+                        <td class="text-muted">Templates</td>
+                        <td class="fw-bold">{{ templates|length }} file(s)</td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Created</td>
+                        <td>{{ group.created_at.strftime('%b %d, %Y at %I:%M %p') if group.created_at else '—' }}</td>
+                    </tr>
+                </table>
+
+                {% if group.description %}
+                <div class="mt-3">
+                    <label class="form-label small fw-bold text-muted">Description</label>
+                    <p class="mb-0">{{ group.description }}</p>
                 </div>
                 {% endif %}
             </div>
         </div>
     </div>
 
-    <div class="col-md-4">
+    <div class="col-md-8">
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-info-circle me-2" style="color: var(--primary);"></i>Template Info
+                <i class="bi bi-files me-2" style="color: var(--primary);"></i>Position Templates
             </div>
-            <div class="card-body">
-                <table class="table table-sm">
-                    <tr>
-                        <td class="text-muted">File Type</td>
-                        <td class="fw-bold">{{ template.file_type|upper }}</td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">Created</td>
-                        <td>{{ template.created_at.strftime('%b %d, %Y at %I:%M %p') if template.created_at else '—' }}</td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">Last Updated</td>
-                        <td>{{ template.updated_at.strftime('%b %d, %Y at %I:%M %p') if template.updated_at else '—' }}</td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">File Path</td>
-                        <td><code class="small">{{ template.file_path }}</code></td>
-                    </tr>
-                </table>
-
-                {% if template.description %}
-                <div class="mt-3">
-                    <label class="form-label small fw-bold text-muted">Description</label>
-                    <p class="mb-0">{{ template.description }}</p>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="card mt-4">
-            <div class="card-header">
-                <i class="bi bi-tags me-2" style="color: var(--primary);"></i>Placeholder Fields
-            </div>
-            <div class="card-body">
-                <p class="small text-muted mb-3">
-                    These fields will be replaced with participant data during certificate generation.
-                </p>
-                {% set placeholders = template.get_placeholders() %}
-                {% if placeholders %}
-                <div class="d-flex flex-wrap gap-2">
-                    {% for field in placeholders %}
-                    <div class="placeholder-tag d-flex align-items-center gap-1">
-                        <i class="bi bi-cursor-text"></i>
-                        {{ field }}
-                    </div>
-                    {% endfor %}
+            <div class="card-body p-0">
+                {% if templates %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Position</th>
+                                <th>File Type</th>
+                                <th>File</th>
+                                <th>Placeholders</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in templates %}
+                            <tr>
+                                <td class="text-muted">{{ loop.index }}</td>
+                                <td>
+                                    <span class="badge bg-primary">{{ t.position_label }}</span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-light text-dark">
+                                        <i class="bi bi-file-earmark-{{ 'pdf' if t.file_type == 'pdf' else 'image' }} me-1"></i>
+                                        {{ t.file_type|upper }}
+                                    </span>
+                                </td>
+                                <td><code class="small">{{ t.file_path.split('/')[-1] }}</code></td>
+                                <td>
+                                    {% for field in t.get_placeholders() %}
+                                    <span class="placeholder-tag small">{{ field }}</span>
+                                    {% else %}
+                                    <span class="text-muted small">—</span>
+                                    {% endfor %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
                 {% else %}
-                <div class="alert alert-warning mb-0">
-                    <i class="bi bi-exclamation-triangle me-1"></i>
-                    No placeholder fields defined. Add placeholders to enable dynamic certificate generation.
+                <div class="empty-state">
+                    <i class="bi bi-files"></i>
+                    <h4>No templates in this group</h4>
                 </div>
                 {% endif %}
             </div>
