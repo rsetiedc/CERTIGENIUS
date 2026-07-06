@@ -6,7 +6,8 @@ os.makedirs("fonts", exist_ok=True)
 
 fonts = {
     "Niconne-Regular.ttf": "https://github.com/google/fonts/raw/main/ofl/niconne/Niconne-Regular.ttf",
-    "Montserrat-Regular.ttf": "https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Regular.ttf"
+    "Montserrat-Regular.ttf": "https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Regular.ttf",
+    "Montserrat-Bold.ttf": "https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Bold.ttf"
 }
 
 for filename, url in fonts.items():

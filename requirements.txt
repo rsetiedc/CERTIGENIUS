@@ -9,3 +9,4 @@ openpyxl
 python-dotenv
 email-validator
 gunicorn
+qrcode[pil]

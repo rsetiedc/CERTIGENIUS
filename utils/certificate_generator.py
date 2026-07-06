@@ -5,10 +5,12 @@ Supports PNG, JPG, and PDF templates.
 """
 
 import os
+import io
 from collections import Counter
 
 import fitz  # PyMuPDF for PDF editing
 from PIL import Image, ImageDraw, ImageFont
+import qrcode
 
 from config import Config
 
@@ -133,7 +135,7 @@ def _erase_text_area(draw, img, text_x, text_y, text_width, text_height, padding
 
 
 def generate_from_image_template(
-    template_path, output_path, data, placeholders=None, dpi=300
+    template_path, output_path, data, placeholders=None, dpi=300, qr_data=None
 ):
     """
     Generate a certificate from an image template by drawing text on it.
@@ -184,6 +186,10 @@ def generate_from_image_template(
             if len(color) == 4:
                 color = color[:3]  # Strip alpha for RGB mode
 
+            # If it's prize_position, event_name, or date, render it bold
+            if field_name.lower() in ("prize_position", "event_name", "date"):
+                font_path = _get_bold_font(font_path)
+
             font = _get_font(font_path, font_size)
 
             # Handle text drawing with alignment
@@ -213,17 +219,27 @@ def generate_from_image_template(
         start_y = height // 3
 
         special_fields = {
-            "participant_name": {"size": font_size + 20, "y_offset": 0},
-            "prize_position": {"size": font_size, "y_offset": font_size + 40},
-            "event_name": {"size": font_size, "y_offset": 2 * (font_size + 40)},
+            "participant_name": {"size": font_size + 20, "y_offset": 0, "bold": False},
+            "prize_position": {"size": font_size, "y_offset": font_size + 40, "bold": True},
+            "event_name": {"size": font_size, "y_offset": 2 * (font_size + 40), "bold": True},
+            "date": {"size": font_size, "y_offset": 3 * (font_size + 40), "bold": True},
         }
 
         for i, (field_name, value) in enumerate(data.items()):
             if not value:
                 continue
 
-            field_config = special_fields.get(field_name.lower(), {"size": font_size, "y_offset": 0})
+            field_config = special_fields.get(field_name.lower(), {"size": font_size, "y_offset": 0, "bold": False})
             use_size = field_config.get("size", font_size)
+            use_bold = field_config.get("bold", False)
+
+            # Clean time if it is the date field
+            if field_name.lower() == "date":
+                val_str = str(value).strip()
+                for time_pattern in [" 00:00:00", "T00:00:00", " 00:00", "T00:00"]:
+                    if time_pattern in val_str:
+                        val_str = val_str.replace(time_pattern, "")
+                value = val_str.strip()
 
             # Compute actual y offset based on configured ones
             if field_name.lower() in special_fields:
@@ -231,7 +247,8 @@ def generate_from_image_template(
             else:
                 y_offset = start_y + (font_size + 20) * i
 
-            use_font = _get_font(primary_font, use_size) if primary_font else ImageFont.load_default()
+            font_to_use = _get_bold_font(primary_font) if (use_bold and primary_font) else primary_font
+            use_font = _get_font(font_to_use, use_size) if font_to_use else ImageFont.load_default()
 
             bbox = draw.textbbox((0, 0), str(value), font=use_font)
             text_width = bbox[2] - bbox[0]
@@ -248,6 +265,22 @@ def generate_from_image_template(
                 font=use_font,
             )
 
+    if qr_data:
+        qr = qrcode.QRCode(version=1, box_size=10, border=1)
+        qr.add_data(qr_data)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+        
+        # Calculate QR code size and position (bottom right corner)
+        # Using roughly 15% of width for the QR code size
+        qr_size = int(width * 0.15)
+        qr_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+        
+        # Position at ~82% width, ~74% height to match the PDF coordinates roughly
+        qr_x = int(width * 0.816)
+        qr_y = int(height * 0.737)
+        img_rgb.paste(qr_img, (qr_x, qr_y))
+
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -256,7 +289,7 @@ def generate_from_image_template(
 
 
 def generate_from_pdf_template(
-    template_path, output_path, data, placeholders=None
+    template_path, output_path, data, placeholders=None, qr_data=None
 ):
     """
     Generate a certificate from a PDF template using PyMuPDF (fitz).
@@ -272,11 +305,17 @@ def generate_from_pdf_template(
     doc = fitz.open(template_path)
     page = doc[0]
 
+    # Get absolute base directory of the project
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
     # --- Register the official Niconne-Regular font for participant name ---
     script_font_name = "helv"
     niconne_font = None
     # Check both current directory and absolute path paths
-    for font_path in ["fonts/Niconne-Regular.ttf", os.path.join(Config.UPLOAD_FOLDER, "..", "fonts", "Niconne-Regular.ttf")]:
+    for font_path in [
+        os.path.join(base_dir, "fonts", "Niconne-Regular.ttf"),
+        "fonts/Niconne-Regular.ttf"
+    ]:
         if os.path.exists(font_path):
             try:
                 page.insert_font(fontname="Niconne", fontfile=font_path)
@@ -289,12 +328,29 @@ def generate_from_pdf_template(
     # --- Register the official Montserrat-Regular font for body text ---
     body_render_font = "helv"
     montserrat_font = None
-    for font_path in ["fonts/Montserrat-Regular.ttf", os.path.join(Config.UPLOAD_FOLDER, "..", "fonts", "Montserrat-Regular.ttf")]:
+    for font_path in [
+        os.path.join(base_dir, "fonts", "Montserrat-Regular.ttf"),
+        "fonts/Montserrat-Regular.ttf"
+    ]:
         if os.path.exists(font_path):
             try:
                 page.insert_font(fontname="Montserrat", fontfile=font_path)
                 body_render_font = "Montserrat"
                 montserrat_font = fitz.Font(fontfile=font_path)
+                break
+            except Exception:
+                pass
+
+    # --- Register the official Montserrat-Bold font for bold body text ---
+    body_render_font_bold = "hebo"  # 'hebo' is the valid built-in Helvetica Bold name in PyMuPDF
+    for font_path in [
+        os.path.join(base_dir, "fonts", "Montserrat-Bold.ttf"),
+        "fonts/Montserrat-Bold.ttf"
+    ]:
+        if os.path.exists(font_path):
+            try:
+                page.insert_font(fontname="MontserratBold", fontfile=font_path)
+                body_render_font_bold = "MontserratBold"
                 break
             except Exception:
                 pass
@@ -463,7 +519,7 @@ def generate_from_pdf_template(
         page.insert_textbox(
             rect,
             combined_text,
-            fontname=body_render_font,
+            fontname=body_render_font_bold,
             fontsize=body_fontsize,
             align=1,  # fitz.TEXT_ALIGN_CENTER
             color=(0, 0, 0),
@@ -472,6 +528,13 @@ def generate_from_pdf_template(
     # ---------- 3. Date ----------
     if date_val and date_span:
         date_str = str(date_val).strip()
+
+        # Clean 00:00:00 from date
+        for time_pattern in [" 00:00:00", "T00:00:00", " 00:00", "T00:00"]:
+            if time_pattern in date_str:
+                date_str = date_str.replace(time_pattern, "")
+        date_str = date_str.strip()
+
         db = date_span["bbox"]
         full_text = date_span["text"]
 
@@ -497,11 +560,24 @@ def generate_from_pdf_template(
         page.insert_textbox(
             rect,
             full_date_text,
-            fontname=body_render_font,
+            fontname=body_render_font_bold,
             fontsize=body_fontsize,
             align=1,  # fitz.TEXT_ALIGN_CENTER
             color=(0, 0, 0),
         )
+
+    # ---------- 4. QR Code ----------
+    if qr_data:
+        qr = qrcode.QRCode(version=1, box_size=10, border=1)
+        qr.add_data(qr_data)
+        qr.make(fit=True)
+        img_qr = qr.make_image(fill_color="black", back_color="white")
+        img_bytes = io.BytesIO()
+        img_qr.save(img_bytes, format="PNG")
+        
+        # Insert QR code over the exact gold placeholder bounding box
+        qr_rect = fitz.Rect(687.36, 438.78, 809.52, 566.16)
+        page.insert_image(qr_rect, stream=img_bytes.getvalue())
 
     # ---------- Save ----------
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -512,7 +588,7 @@ def generate_from_pdf_template(
 
 
 def generate_certificate(
-    template_path, template_type, output_path, data, placeholders=None
+    template_path, template_type, output_path, data, placeholders=None, qr_data=None
 ):
     """
     Generate a certificate using the appropriate method based on template type.
@@ -529,11 +605,11 @@ def generate_certificate(
     """
     if template_type.lower() in ("png", "jpg", "jpeg"):
         return generate_from_image_template(
-            template_path, output_path, data, placeholders
+            template_path, output_path, data, placeholders, qr_data=qr_data
         )
     elif template_type.lower() == "pdf":
         return generate_from_pdf_template(
-            template_path, output_path, data, placeholders
+            template_path, output_path, data, placeholders, qr_data=qr_data
         )
     else:
         raise ValueError(f"Unsupported template type: {template_type}")

@@ -446,23 +446,12 @@ def register_routes(app):
                             filtered_data[field_name] = f"[{field_name}]"
                     data = filtered_data
 
-                # Generate certificate
                 cert_filename = f"{participant.id}_{uuid.uuid4().hex}.pdf"
-                cert_path = os.path.join(cert_output_dir, cert_filename)
-
-                generate_certificate(
-                    template_path=template_path,
-                    template_type=template.file_type,
-                    output_path=cert_path,
-                    data=data,
-                    placeholders=placeholders if isinstance(placeholders, list) and placeholders and isinstance(placeholders[0], dict) else None,
-                )
-
                 relative_path = os.path.join(
                     Config.CERTIFICATE_FOLDER, str(batch.id), cert_filename
                 )
 
-                # Check for existing certificate for this participant
+                # Create or get existing certificate for this participant
                 existing_cert = Certificate.query.filter_by(
                     batch_id=batch.id, participant_id=participant.id
                 ).first()
@@ -470,19 +459,55 @@ def register_routes(app):
                 if existing_cert:
                     existing_cert.file_path = relative_path
                     existing_cert.template_id = template.id
-                    existing_cert.status = "generated"
+                    existing_cert.status = "generating"
                     existing_cert.error_message = ""
                 else:
-                    cert = Certificate(
+                    existing_cert = Certificate(
                         batch_id=batch.id,
                         participant_id=participant.id,
                         template_id=template.id,
                         file_path=relative_path,
-                        status="generated",
+                        status="generating",
                     )
-                    db.session.add(cert)
+                    db.session.add(existing_cert)
+                
+                # Commit here to get the existing_cert.id for the verification URL
+                db.session.commit()
 
+                # Prepare the Verification URL
+                base_url = request.url_root.rstrip("/")
+                verify_url = f"{base_url}/verify/{existing_cert.id}"
+                
+                # Fetch extra details for QR Code Metadata
+                extra = participant.get_extra_data()
+                event_name = extra.get("Event") or extra.get("event") or extra.get("Event Name") or batch.name
+                date_val = extra.get("Date") or extra.get("date") or extra.get("Event Date") or ""
+                
+                qr_metadata = (
+                    f"Certificate ID: {existing_cert.id}\n"
+                    f"Awarded To: {participant.name}\n"
+                    f"Event: {event_name}\n"
+                    f"Achievement: {participant.prize_position}\n"
+                    f"Date: {date_val}\n"
+                    f"Verify at: {verify_url}"
+                )
+
+                # Generate certificate
+                cert_path = os.path.join(app.root_path, relative_path)
+
+                generate_certificate(
+                    template_path=template_path,
+                    template_type=template.file_type,
+                    output_path=cert_path,
+                    data=data,
+                    placeholders=placeholders if isinstance(placeholders, list) and placeholders and isinstance(placeholders[0], dict) else None,
+                    qr_data=qr_metadata
+                )
+
+                existing_cert.status = "generated"
                 generated_count += 1
+
+
 
             except Exception as e:
                 logger.exception(f"Failed to generate certificate for {participant.name}")
@@ -526,6 +551,41 @@ def register_routes(app):
         )
         return redirect(url_for("batch_detail", batch_id=batch_id))
 
+    # ---------- Certificate Verification ----------
+
+    @app.route("/verify/<int:cert_id>")
+    def verify_certificate(cert_id):
+        cert = Certificate.query.get_or_404(cert_id)
+        
+        # Pull extra details directly from the participant's batch data logic used for generation
+        participant = cert.participant
+        batch = cert.batch
+        extra = participant.get_extra_data()
+        
+        event_name = (
+            extra.get("Event")
+            or extra.get("event")
+            or extra.get("Event Name")
+            or extra.get("event_name")
+            or batch.name
+        )
+        
+        date_val = (
+            extra.get("Date")
+            or extra.get("date")
+            or extra.get("Event Date")
+            or extra.get("event_date")
+            or ""
+        )
+        
+        return render_template(
+            "verify.html", 
+            certificate=cert, 
+            participant=participant, 
+            event_name=event_name, 
+            date_val=date_val
+        )
+
     # ---------- Certificate Distribution ----------
 
     @app.route("/batches/<int:batch_id>/distribute", methods=["POST"])
@@ -541,12 +601,13 @@ def register_routes(app):
             )
             return redirect(url_for("batch_detail", batch_id=batch_id))
 
-        certificates = Certificate.query.filter_by(
-            batch_id=batch.id, status="generated"
+        certificates = Certificate.query.filter(
+            Certificate.batch_id == batch.id,
+            Certificate.status.in_(["generated", "failed"])
         ).all()
 
         if not certificates:
-            flash("No generated certificates to distribute.", "warning")
+            flash("No generated or failed certificates to distribute.", "warning")
             return redirect(url_for("batch_detail", batch_id=batch_id))
 
         batch.status = "distributing"
