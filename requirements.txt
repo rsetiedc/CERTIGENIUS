@@ -1,4 +1,4 @@
-Pillow
+Pillow>=12.0.0
 PyMuPDF
 openpyxl
 python-dotenv
