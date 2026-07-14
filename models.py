@@ -1,28 +1,57 @@
+"""
+SQLAlchemy models for the CertiGenius application.
+Uses declarative_base() for Streamlit compatibility (no Flask dependency).
+"""
 import json
 from datetime import datetime, timezone
 
-from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import (
+    Boolean, Column, DateTime, ForeignKey, Integer, String, Text, create_engine
+)
+from sqlalchemy.orm import declarative_base, relationship
 
-db = SQLAlchemy()
+Base = declarative_base()
 
 
-class TemplateGroup(db.Model):
+def _normalize_position(pos):
+    """Normalize a prize position string for matching.
+
+    Maps common variants to canonical forms:
+    '1st', '1st prize', 'first', 'first prize' -> '1st'
+    '2nd', '2nd prize', 'second' -> '2nd'
+    '3rd', '3rd prize', 'third' -> '3rd'
+    Everything else -> lowercase stripped
+    """
+    if not pos:
+        return "participation"
+    s = pos.strip().lower().replace("_", " ").replace("-", " ")
+    for suffix in (" prize", " place", " position"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)].strip()
+    mapping = {
+        "1st": "1st", "first": "1st", "1": "1st",
+        "2nd": "2nd", "second": "2nd", "2": "2nd",
+        "3rd": "3rd", "third": "3rd", "3": "3rd",
+        "participation": "participation", "participant": "participation",
+    }
+    return mapping.get(s, s)
+
+
+class TemplateGroup(Base):
     """A group of certificate templates, one per prize position."""
     __tablename__ = "template_groups"
 
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, default="")
-    created_at = db.Column(
-        db.DateTime, default=lambda: datetime.now(timezone.utc)
-    )
-    is_deleted = db.Column(db.Boolean, default=False)
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False)
 
     # Relationships
-    templates = db.relationship(
+    templates = relationship(
         "Template", backref="group", lazy="dynamic", cascade="all, delete-orphan"
     )
-    batches = db.relationship(
+    batches = relationship(
         "CertificateBatch", backref="template_group", lazy="dynamic"
     )
 
@@ -34,11 +63,9 @@ class TemplateGroup(db.Model):
         for t in self.templates.filter_by(is_deleted=False).all():
             if _normalize_position(t.position_label) == norm:
                 return t
-        # Fallback: try participation template
         for t in self.templates.filter_by(is_deleted=False).all():
             if _normalize_position(t.position_label) == "participation":
                 return t
-        # Last resort: first template in the group
         return self.templates.filter_by(is_deleted=False).first()
 
     def to_dict(self):
@@ -52,58 +79,28 @@ class TemplateGroup(db.Model):
         }
 
 
-def _normalize_position(pos):
-    """Normalize a prize position string for matching.
-    
-    Maps common variants to canonical forms:
-    '1st', '1st prize', 'first', 'first prize' -> '1st'
-    '2nd', '2nd prize', 'second' -> '2nd'
-    '3rd', '3rd prize', 'third' -> '3rd'
-    Everything else -> lowercase stripped
-    """
-    if not pos:
-        return "participation"
-    s = pos.strip().lower().replace("_", " ").replace("-", " ")
-    # Remove trailing "prize" / "place"
-    for suffix in (" prize", " place", " position"):
-        if s.endswith(suffix):
-            s = s[: -len(suffix)].strip()
-    mapping = {
-        "1st": "1st", "first": "1st", "1": "1st",
-        "2nd": "2nd", "second": "2nd", "2": "2nd",
-        "3rd": "3rd", "third": "3rd", "3": "3rd",
-        "participation": "participation", "participant": "participation",
-    }
-    return mapping.get(s, s)
-
-
-class Template(db.Model):
+class Template(Base):
     __tablename__ = "templates"
 
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, default="")
-    file_path = db.Column(db.String(500), nullable=False)
-    file_type = db.Column(db.String(10), nullable=False)  # png, jpg, pdf
-    position_label = db.Column(db.String(50), default="Participation")  # 1st, 2nd, 3rd, Participation
-    placeholder_fields = db.Column(db.Text, default="[]")  # JSON array of field names
-    width = db.Column(db.Integer, default=1200)
-    height = db.Column(db.Integer, default=800)
-    group_id = db.Column(db.Integer, db.ForeignKey("template_groups.id"), nullable=True)
-    created_at = db.Column(
-        db.DateTime, default=lambda: datetime.now(timezone.utc)
-    )
-    updated_at = db.Column(
-        db.DateTime,
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    file_path = Column(String(500), nullable=False)
+    file_type = Column(String(10), nullable=False)
+    position_label = Column(String(50), default="Participation")
+    placeholder_fields = Column(Text, default="[]")
+    width = Column(Integer, default=1200)
+    height = Column(Integer, default=800)
+    group_id = Column(Integer, ForeignKey("template_groups.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
-    is_deleted = db.Column(db.Boolean, default=False)
+    is_deleted = Column(Boolean, default=False)
 
-    # Relationships
-    certificates = db.relationship(
-        "Certificate", backref="template", lazy="dynamic"
-    )
+    certificates = relationship("Certificate", backref="template", lazy="dynamic")
 
     def get_placeholders(self):
         return json.loads(self.placeholder_fields) if self.placeholder_fields else []
@@ -128,21 +125,18 @@ class Template(db.Model):
         }
 
 
-class Participant(db.Model):
+class Participant(Base):
     __tablename__ = "participants"
 
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False)
-    email = db.Column(db.String(200), nullable=False)
-    prize_position = db.Column(db.String(50), default="Participation")
-    extra_data = db.Column(db.Text, default="{}")  # JSON for additional columns
-    batch_id = db.Column(db.Integer, db.ForeignKey("certificate_batches.id"))
-    created_at = db.Column(
-        db.DateTime, default=lambda: datetime.now(timezone.utc)
-    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    email = Column(String(200), nullable=False)
+    prize_position = Column(String(50), default="Participation")
+    extra_data = Column(Text, default="{}")
+    batch_id = Column(Integer, ForeignKey("certificate_batches.id"))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    # Relationships
-    certificates = db.relationship("Certificate", backref="participant", lazy="dynamic")
+    certificates = relationship("Certificate", backref="participant", lazy="dynamic")
 
     def get_extra_data(self):
         return json.loads(self.extra_data) if self.extra_data else {}
@@ -162,30 +156,25 @@ class Participant(db.Model):
         }
 
 
-class CertificateBatch(db.Model):
+class CertificateBatch(Base):
     __tablename__ = "certificate_batches"
 
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False)
-    template_group_id = db.Column(db.Integer, db.ForeignKey("template_groups.id"), nullable=True)
-    status = db.Column(
-        db.String(20), default="pending"
-    )  # pending, generating, generated, distributing, completed, failed
-    total_count = db.Column(db.Integer, default=0)
-    generated_count = db.Column(db.Integer, default=0)
-    sent_count = db.Column(db.Integer, default=0)
-    failed_count = db.Column(db.Integer, default=0)
-    error_message = db.Column(db.Text, default="")
-    created_at = db.Column(
-        db.DateTime, default=lambda: datetime.now(timezone.utc)
-    )
-    completed_at = db.Column(db.DateTime, nullable=True)
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    template_group_id = Column(Integer, ForeignKey("template_groups.id"), nullable=True)
+    status = Column(String(20), default="pending")
+    total_count = Column(Integer, default=0)
+    generated_count = Column(Integer, default=0)
+    sent_count = Column(Integer, default=0)
+    failed_count = Column(Integer, default=0)
+    error_message = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
 
-    # Relationships
-    participants = db.relationship(
+    participants = relationship(
         "Participant", backref="batch", lazy="dynamic", cascade="all, delete-orphan"
     )
-    certificates = db.relationship(
+    certificates = relationship(
         "Certificate", backref="batch", lazy="dynamic", cascade="all, delete-orphan"
     )
 
@@ -206,28 +195,18 @@ class CertificateBatch(db.Model):
         }
 
 
-class Certificate(db.Model):
+class Certificate(Base):
     __tablename__ = "certificates"
 
-    id = db.Column(db.Integer, primary_key=True)
-    batch_id = db.Column(
-        db.Integer, db.ForeignKey("certificate_batches.id"), nullable=False
-    )
-    participant_id = db.Column(
-        db.Integer, db.ForeignKey("participants.id"), nullable=False
-    )
-    template_id = db.Column(
-        db.Integer, db.ForeignKey("templates.id"), nullable=False
-    )
-    file_path = db.Column(db.String(500), default="")
-    status = db.Column(
-        db.String(20), default="pending"
-    )  # pending, generated, sent, failed
-    error_message = db.Column(db.Text, default="")
-    sent_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(
-        db.DateTime, default=lambda: datetime.now(timezone.utc)
-    )
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(Integer, ForeignKey("certificate_batches.id"), nullable=False)
+    participant_id = Column(Integer, ForeignKey("participants.id"), nullable=False)
+    template_id = Column(Integer, ForeignKey("templates.id"), nullable=False)
+    file_path = Column(String(500), default="")
+    status = Column(String(20), default="pending")
+    error_message = Column(Text, default="")
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {

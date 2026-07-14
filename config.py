@@ -3,16 +3,22 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+# If running on Streamlit Cloud, load secrets into environment
+# so existing code (email_sender, etc.) can access them via os.getenv
+try:
+    import streamlit as st
+    for key in st.secrets:
+        if key not in os.environ:
+            os.environ[key] = str(st.secrets[key])
+except (ImportError, RuntimeError):
+    pass  # Not in Streamlit context, rely on .env / env vars
+
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
-    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///certigenius.db")
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
     CERTIFICATE_FOLDER = os.getenv("CERTIFICATE_FOLDER", "generated_certificates")
-
-    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50 MB max upload
 
     # Mail settings - Gmail SMTP with App Password
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")

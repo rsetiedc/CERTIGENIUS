@@ -1,12 +1,8 @@
-Flask==3.0.0
-Flask-SQLAlchemy==3.1.1
-Flask-Migrate==4.0.5
-Flask-WTF==1.2.1
-WTForms==3.1.1
 Pillow
 PyMuPDF
 openpyxl
 python-dotenv
 email-validator
-gunicorn
 qrcode[pil]
+streamlit==1.37.0
+sqlalchemy==2.0.35

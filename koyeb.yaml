@@ -1,0 +1,11 @@
+name: certigenius
+service:
+  port: 8000
+  health:
+    path: /
+    interval: 30
+    timeout: 10
+    initial_delay: 10
+  env:
+    - key: FLASK_ENV
+      value: production
