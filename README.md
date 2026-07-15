@@ -8,12 +8,14 @@ CertiGenius streamlines the process of creating and distributing digital certifi
 
 ## Features
 
-- **📄 Template Management** — Upload certificate templates in PNG, JPG, or PDF format with customizable placeholder fields
-- **📊 Participant Import** — Upload participant data via CSV or Excel (.xlsx/.xls) files with automatic column detection
-- **🖨️ Certificate Generation** — Dynamically populate templates with participant names, prize positions, and custom data
-- **📧 Email Distribution** — Send personalized certificates directly to participants' Gmail inboxes with styled HTML emails
-- **📈 Batch Tracking** — Monitor generation and distribution status with progress tracking
-- **⬇️ Individual Downloads** — Download any certificate as a PDF at any time
+- **📄 Template Management** — Upload certificate templates in PNG, JPG, or PDF format with customizable placeholder fields. Supports template groups with position-based auto-detection (1st, 2nd, 3rd, Participation).
+- **📊 Participant Import** — Upload participant data via CSV or Excel (.xlsx/.xls) files with intelligent column auto-detection.
+- **🖨️ Certificate Generation** — Dynamically populate templates with participant names, prize positions, event details, and custom data fields. Includes QR code metadata for verification.
+- **📧 Email Distribution** — Send personalized certificates directly to participants' inboxes with styled HTML emails and PDF attachments via Gmail SMTP.
+- **📦 Batch ZIP Download** — Download all generated certificates in a single ZIP archive with participant names as filenames.
+- **✅ Certificate Verification** — Built-in verification page to authenticate certificates via QR code or direct link.
+- **📈 Batch Tracking** — Monitor generation and distribution status with live progress tracking.
+- **⬇️ Individual Downloads** — Download any certificate as a PDF at any time.
 
 ---
 
@@ -21,166 +23,140 @@ CertiGenius streamlines the process of creating and distributing digital certifi
 
 ### 1. Setup
 
-Follow the detailed [Setup Guide](SETUP.md) to install dependencies and configure the application.
-
 ```bash
+# Clone the repo
+git clone <repository-url>
+cd certigenius
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure .env with your settings
-# Then run
-python3 run.py
+# Configure credentials (optional — for email distribution only)
+cp .env.example .env
+# Edit .env with your Gmail App Password
+
+# Run the app
+streamlit run Home.py
 ```
 
-Open **http://localhost:5000** in your browser.
+Open **http://localhost:8501** in your browser.
 
 ### 2. Upload a Template
 
-1. Navigate to **Templates** in the navigation bar
-2. Click **Upload Template**
-3. Select your certificate design (PNG, JPG, or PDF)
+1. Navigate to **📄 Templates** in the sidebar
+2. Click **Upload Template Group**
+3. Enter a group name and select your certificate design files (PNG, JPG, or PDF)
 4. Define **placeholder fields** — comma-separated field names like: `participant_name, prize_position, event_name`
 5. Click **Upload**
 
 > 💡 **Template Design Tips:**
 > - Create your certificate design in Canva, Photoshop, or any image editor
 > - Leave blank spaces where text should appear
-> - Upload at a high resolution (1200x800 px or larger) for best print quality
-> - Use a simple, clean background so text is readable
+> - Upload at a high resolution (1200×800 px or larger) for best print quality
+> - Name files by position for auto-detection: `1st_prize.png`, `participation.png`, etc.
 
 ### 3. Import Participants
 
-Prepare your participant data in a CSV or Excel file. CertiGenius automatically detects the required columns.
+Prepare participant data in a CSV or Excel file. CertiGenius automatically detects the required columns.
 
-**Required columns (names are auto-detected):**
+**Required columns (auto-detected):**
 
 | Name | Email | Prize Position |
 |---|---|---|
 | John Doe | john@example.com | 1st |
 | Jane Smith | jane@example.com | 2nd |
 | Bob Wilson | bob@example.com | Participation |
-| Alice Brown | alice@example.com | 3rd |
 
 > **Column name examples:**
 > - Name: `Name`, `Full Name`, `Participant Name`, `Candidate Name`
 > - Email: `Email`, `E-mail`, `Email Address`, `Mail`
 > - Prize Position: `Prize`, `Prize Position`, `Position`, `Award`, `Rank`, `Result`
 
-**Any additional columns** in your file are automatically stored as extra data and can be used as placeholder fields in your templates.
-
-#### Upload Steps:
-
-1. Go to **Participants** → **Import Participants**
-2. Give your batch a name (e.g., "Summer Workshop 2025")
-3. (Optional) Select a template to associate with this batch
-4. Upload your CSV or Excel file
-5. Click **Upload**
-
-You'll be redirected to the **Batch Detail** page showing all imported participants.
+**Any additional columns** (e.g., `Organization`, `Course`, `Event`, `Date`) are automatically stored as extra data and can be used as template placeholders.
 
 ### 4. Generate Certificates
 
-1. Go to the **Batch Detail** page for your batch
-2. Click **Generate Certificates**
+1. Go to **📦 Batches** → click a batch to view its detail page
+2. Click **🔨 Generate Certificates**
 3. The system processes each participant, creating personalized PDF certificates
-4. Progress is tracked — green checkmarks indicate success, red for failures
+4. Smart text placement detects dashed lines in templates for precise text positioning
+5. QR codes are embedded with certificate metadata for verification
 
-### 5. Distribute Certificates
+### 5. Distribute & Download
 
-#### Via Email (requires Gmail SMTP configuration)
-
-1. On the **Batch Detail** page, click **Distribute via Email**
-2. Each participant receives a beautifully styled HTML email with their certificate attached as a PDF
-
-> **Note:** You must configure `MAIL_USERNAME` and `MAIL_PASSWORD` in your `.env` file first. See the [Setup Guide](SETUP.md#step-4-configure-environment-variables) for instructions on generating a Gmail App Password.
-
-#### Via Download
-
-- **Individual download:** Click the download icon next to any certificate in the batch detail table
-- **Bulk download:** Generate all certificates, then download them from the `generated_certificates/` folder
+- **📧 Distribute via Email** — Each participant receives a styled HTML email with their certificate as a PDF attachment (requires Gmail credentials)
+- **📦 Download All as ZIP** — Bulk download all certificates in a single archive
+- **⬇️ Individual Downloads** — Download single certificates from the batch detail page
 
 ---
 
-## Workflow Overview
+## Pages Overview
 
-```
-┌─────────────┐     ┌─────────────────┐     ┌────────────────────┐     ┌──────────────────┐
-│  1. Upload   │ ──→ │  2. Import      │ ──→ │  3. Generate       │ ──→ │  4. Distribute   │
-│   Template   │     │   Participants  │     │   Certificates     │     │   via Email      │
-└─────────────┘     └─────────────────┘     └────────────────────┘     └──────────────────┘
-```
+### 📊 Dashboard (`Home.py`)
+- Statistics cards showing counts for templates, participants, batches, certificates, and emails sent
+- Quick action buttons for each workflow step
+- Recent batches list with status indicators
+- Visual 4-step workflow guide
 
----
+### 📄 Templates (`pages/1_Templates.py`)
+- Upload template groups with multiple position-based designs
+- Define placeholder fields for dynamic text placement
+- View all template groups with file type counts
+- Delete unwanted templates
 
-## Page-by-Page Guide
+### 👥 Import Participants (`pages/2_Import_Participants.py`)
+- Upload CSV or Excel files with auto-column detection
+- Name your batch and optionally assign a template group
+- Download a sample CSV template
+- View recent uploads
 
-### Dashboard (`/`)
+### 📦 Batches (`pages/3_Batches.py`)
+- View all batches sorted by date
+- Status badges with progress indicators
+- Click through to batch detail pages
 
-- **Statistics Cards** — Quick overview of templates, participants, batches, and certificates sent
-- **Quick Actions** — Shortcuts to manage templates, upload participants, or view batches
-- **Recent Batches** — Shows your 5 most recent batches with status and progress
-- **Workflow Guide** — Visual 4-step guide to using the platform
+### 📦 Batch Detail (`pages/4_Batch_Detail.py`)
+- Batch overview with metrics and template group info
+- Participants table with extra data fields
+- Certificates table with generation/email status
+- Actions: Generate, Email, ZIP Download, Delete
+- Individual certificate downloads
 
-### Templates (`/templates`)
-
-- **Upload a template** with drag-and-drop support
-- **Define placeholders** — comma-separated field names that will be replaced with participant data
-- **View all templates** in a grid with file type, date, and placeholder tags
-- **Delete templates** you no longer need
-- **Click a template** to see its details
-
-### Participants (`/participants/upload`)
-
-- **Import participants** from CSV or Excel files
-- **Name your batch** for easy identification
-- **Assign a template** to the batch (optional, can be done later)
-- **Download a sample CSV** to see the expected format
-- **View recent batches** in the sidebar
-
-### Batches (`/batches`)
-
-- **View all your batches** sorted by date (newest first)
-- **See batch status** at a glance (Pending, Generating, Generated, Distributing, Completed, Failed)
-- **Progress bars** show how many certificates have been processed
-- **Click a batch** to see its full details
-
-### Batch Detail (`/batches/<id>`)
-
-- **Batch overview** with name, template, status, and progress
-- **Participants table** — all imported participants with their details
-- **Certificates table** — generation status for each participant
-- **Actions:**
-  - **Generate Certificates** — populate templates with participant data
-  - **Distribute via Email** — send certificates to all participants
-  - **Delete Batch** — remove the batch and all its certificates
-- **Download individual certificates** by clicking the download button
+### ✅ Verify Certificate (`pages/5_Verify.py`)
+- Look up certificate authenticity by ID
+- Displays certificate metadata (participant, event, date)
+- Accessible via QR code embedded on certificates
 
 ---
 
-## Data Format Reference
+## Email Configuration
 
-### Sample CSV
+To send certificates via email, configure Gmail SMTP credentials. You have **two options**:
 
-```csv
-Name,Email, Prize Position, Organization, Course
-Alice Johnson,alice@example.com,1st,Apex Tech,Advanced Python
-Bob Smith,bob@example.com,2nd,DataCorp,Machine Learning
-Carol Davis,carol@example.com,Participation,WebStudio,Frontend Dev
+### Local Development: `.env` file
+```bash
+cp .env.example .env
+# Edit .env with your Gmail App Password
 ```
 
-### Sample Excel (.xlsx)
+### Streamlit Cloud: Settings → Secrets
+Add these keys to your Streamlit Cloud secrets:
+```toml
+MAIL_USERNAME = "your-email@gmail.com"
+MAIL_PASSWORD = "your-16-char-app-password"
+MAIL_DEFAULT_SENDER = "your-email@gmail.com"
+APP_URL = "https://your-app-name.streamlit.app"
+```
 
-Create an Excel file with the same column structure. Any additional columns (like "Organization" and "Course" above) are stored as extra data and can be used as template placeholders.
-
----
-
-## Use Cases
-
-- **🏫 Educational Institutions** — Course completion certificates, academic awards
-- **🎪 Event Organizers** — Conference attendance, workshop participation
-- **🏆 Competitions** — Hackathon prizes, coding contest winners
-- **💼 Corporate Training** — Employee training completion, skill certifications
-- **🌐 Webinars** — Attendance certificates for online events
+### Getting a Gmail App Password
+1. Enable **2-Step Verification** at https://myaccount.google.com/security
+2. Go to https://myaccount.google.com/apppasswords
+3. Generate an App Password for "Mail" + "Other" device
+4. Copy the 16-character password into your credential file
 
 ---
 
@@ -188,35 +164,14 @@ Create an Excel file with the same column structure. Any additional columns (lik
 
 | Component | Technology |
 |---|---|
-| Backend | Python / Flask |
-| Database | SQLite (default), PostgreSQL-ready |
-| Templates | Jinja2 |
-| Certificate Generation | Pillow (image), ReportLab (PDF) |
+| Web Framework | **Streamlit** (primary), Flask (legacy) |
+| Database | SQLite (default), PostgreSQL-ready via SQLAlchemy |
+| Certificate Generation | Pillow (image templates) |
 | File Parsing | openpyxl, csv |
-| Email | SMTP (Gmail) |
-| Styling | Bootstrap 5, Google Fonts (Inter) |
-
----
-
-## Architecture
-
-CertiGenius follows a modular architecture:
-
-- **app.py** — Main Flask application with all route handlers
-- **models.py** — SQLAlchemy models: `Template`, `Participant`, `CertificateBatch`, `Certificate`
-- **utils/excel_parser.py** — Parses CSV/XLSX files with intelligent column detection
-- **utils/certificate_generator.py** — Generates certificates using Pillow (image templates) or ReportLab (PDF templates)
-- **utils/email_sender.py** — Sends certificates via Gmail SMTP with formatted HTML email bodies
-
-### Database Schema
-
-```
-Template ──┐
-            ├── CertificateBatch ──┐
-            │                      ├── Participant
-            │                      └── Certificate
-            └── Certificate
-```
+| Email | SMTP (Gmail App Passwords) |
+| QR Codes | qrcode[pil] |
+| Fonts | Montserrat (Google Fonts), Niconne |
+| Deployment | Streamlit Cloud, Koyeb (Flask) |
 
 ---
 
@@ -224,19 +179,47 @@ Template ──┐
 
 | Data | Location |
 |---|---|
-| Uploaded templates | `uploads/templates/` |
-| Uploaded participant files | `uploads/participants/` |
+| Certificate templates | `uploads/templates/` |
+| Participant files | `uploads/participants/` |
 | Generated certificates | `generated_certificates/<batch_id>/` |
 | Database | `certigenius.db` |
+| Font files | `fonts/` |
+
+---
+
+## Use Cases
+
+- **🏫 Educational Institutions** — Course completion, academic awards
+- **🎪 Event Organizers** — Conference attendance, workshop participation
+- **🏆 Competitions** — Hackathon prizes, coding contest winners
+- **💼 Corporate Training** — Employee training completion, skill certifications
+- **🌐 Webinars** — Attendance certificates for online events
 
 ---
 
 ## Limitations (Current Version)
 
-- **PDF template editing** — PDF templates generate a new PDF rather than editing the uploaded PDF directly. For advanced PDF template support, consider using PyMuPDF.
-- **Authentication** — No user authentication is implemented. Recommended for local/internal network use.
-- **Gmail only** — Email distribution is configured for Gmail SMTP. Other providers require configuration changes in `.env`.
-- **Single user** — No multi-user or role-based access control.
+- **PDF template editing** — PDF templates generate a new PDF rather than editing the uploaded PDF directly.
+- **Gmail only** — Email distribution is configured for Gmail SMTP. Other providers require changes in the credential files.
+- **Single user** — No multi-user authentication or role-based access.
+- **Streamlit Cloud free tier** — Apps sleep after 7 days of inactivity.
+
+---
+
+## Architecture
+
+CertiGenius follows a modular architecture with Streamlit as the primary interface:
+
+- **`Home.py`** — Streamlit entry point with dashboard
+- **`pages/*.py`** — Multi-page Streamlit app (Templates, Import, Batches, Verification)
+- **`config.py`** — Configuration loading (`.env` + Streamlit secrets)
+- **`models.py`** — SQLAlchemy models (standalone, no Flask dependency)
+- **`utils/db.py`** — Streamlit-compatible database connection
+- **`utils/excel_parser.py`** — CSV/XLSX parsing with column auto-detection
+- **`utils/certificate_generator.py`** — Certificate generation with smart text positioning
+- **`utils/email_sender.py`** — Gmail SMTP with styled HTML email templates
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed diagrams.
 
 ---
 

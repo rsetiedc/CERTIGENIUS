@@ -17,6 +17,10 @@ dist/
 build/
 *.egg
 
+# Ad-hoc test files
+test_*.py
+check_center.py
+
 # IDE
 .vscode/
 .idea/
@@ -31,6 +35,7 @@ Thumbs.db
 # Logs
 *.log
 /tmp/
+screenlog.*
 
 # Streamlit
 .streamlit/secrets.toml

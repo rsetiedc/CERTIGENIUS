@@ -188,7 +188,8 @@ class EmailSender:
             return (
                 False,
                 "Email sender is not configured. "
-                "Set MAIL_USERNAME and MAIL_PASSWORD in .env file. "
+                "Set MAIL_USERNAME and MAIL_PASSWORD "
+                "in .env (local) or .streamlit/secrets.toml (Streamlit Cloud). "
                 "For Gmail, use an App Password from https://myaccount.google.com/apppasswords",
             )
 

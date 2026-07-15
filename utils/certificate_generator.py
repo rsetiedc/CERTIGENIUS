@@ -211,59 +211,163 @@ def generate_from_image_template(
             draw.text((text_x, text_y), str(value), fill=color, font=font)
     else:
         # Auto-position placeholders with smart layout
+        # First, attempt to detect dashed lines in the image
+        def detect_dashed_lines(img):
+            width, height = img.size
+            img_l = img.convert('L')
+            
+            lines = []
+            start_x = int(width * 0.2)
+            end_x = int(width * 0.8)
+            scan_width = end_x - start_x
+            
+            pixels = img_l.load()
+            
+            # Scan below the top 30% to avoid headers/borders
+            for y in range(int(height * 0.3), height):
+                dark_count = sum(1 for x in range(start_x, end_x) if pixels[x, y] < 150)
+                if dark_count > scan_width * 0.25:
+                    lines.append(y)
+                    
+            grouped = []
+            if lines:
+                cur_group = [lines[0]]
+                for y in lines[1:]:
+                    if y - cur_group[-1] < 15:
+                        cur_group.append(y)
+                    else:
+                        grouped.append(cur_group)
+                        cur_group = [y]
+                grouped.append(cur_group)
+
+            valid_lines = []
+            for g in grouped:
+                y_center = sum(g) // len(g)
+                g_height = len(g)
+                
+                if g_height <= 6:
+                    x_min, x_max = width, 0
+                    for y in range(max(0, y_center-2), min(height, y_center+3)):
+                        for x in range(width):
+                            if pixels[x, y] < 150:
+                                if x < x_min: x_min = x
+                                if x > x_max: x_max = x
+                    
+                    line_width = x_max - x_min
+                    if line_width > width * 0.2:
+                        valid_lines.append(y_center)
+            
+            return valid_lines
+
+        detected_lines = detect_dashed_lines(img_rgb)
         font_size = min(width // 20, 60)
         font = _get_font(primary_font, font_size) if primary_font else ImageFont.load_default()
 
         # Draw each field with automatic positioning
         center_x = width // 2
-        start_y = height // 3
+        start_y = int(height * 0.45)  # Start lower to avoid header overlap
 
         special_fields = {
             "participant_name": {"size": font_size + 20, "y_offset": 0, "bold": False},
-            "prize_position": {"size": font_size, "y_offset": font_size + 40, "bold": True},
-            "event_name": {"size": font_size, "y_offset": 2 * (font_size + 40), "bold": True},
-            "date": {"size": font_size, "y_offset": 3 * (font_size + 40), "bold": True},
+            "prize_position": {"size": font_size, "y_offset": font_size + 30, "bold": True},
+            "event_name": {"size": font_size, "y_offset": 2 * (font_size + 30), "bold": True},
+            "date": {"size": font_size, "y_offset": 3 * (font_size + 30), "bold": True},
         }
 
-        for i, (field_name, value) in enumerate(data.items()):
-            if not value:
-                continue
-
-            field_config = special_fields.get(field_name.lower(), {"size": font_size, "y_offset": 0, "bold": False})
-            use_size = field_config.get("size", font_size)
-            use_bold = field_config.get("bold", False)
-
-            # Clean time if it is the date field
-            if field_name.lower() == "date":
-                val_str = str(value).strip()
-                for time_pattern in [" 00:00:00", "T00:00:00", " 00:00", "T00:00"]:
-                    if time_pattern in val_str:
-                        val_str = val_str.replace(time_pattern, "")
-                value = val_str.strip()
-
-            # Compute actual y offset based on configured ones
-            if field_name.lower() in special_fields:
-                y_offset = special_fields[field_name.lower()]["y_offset"]
+        if len(detected_lines) >= 3:
+            # We found placeholder lines, map specific fields to them
+            field_mapping = []
+            if len(detected_lines) == 3:
+                # Typical: Name, Event, Date
+                field_mapping = [("participant_name", 0), ("event_name", 1), ("date", 2)]
+                # If there's a prize position, append it to event name so it's printed
+                if "prize_position" in data and str(data["prize_position"]).strip() not in ["", "None", "Participation"]:
+                    if "event_name" in data:
+                        data["event_name"] = f"{data['prize_position']} - {data['event_name']}"
             else:
-                y_offset = start_y + (font_size + 20) * i
+                # Name, Prize, Event, Date (if 4 or more lines)
+                field_mapping = [("participant_name", 0), ("prize_position", 1), ("event_name", 2), ("date", 3)]
 
-            font_to_use = _get_bold_font(primary_font) if (use_bold and primary_font) else primary_font
-            use_font = _get_font(font_to_use, use_size) if font_to_use else ImageFont.load_default()
+            for field_name, line_idx in field_mapping:
+                if line_idx >= len(detected_lines):
+                    continue
+                    
+                value = data.get(field_name)
+                if not value or not str(value).strip():
+                    continue
 
-            bbox = draw.textbbox((0, 0), str(value), font=use_font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            text_x = center_x - text_width // 2
-            text_y = height // 3 + y_offset
+                if field_name.lower() == "date":
+                    val_str = str(value).strip()
+                    for time_pattern in [" 00:00:00", "T00:00:00", " 00:00", "T00:00"]:
+                        if time_pattern in val_str:
+                            val_str = val_str.replace(time_pattern, "")
+                    value = val_str.strip()
 
-            # Erase any placeholder text at this position before drawing
-            _erase_text_area(draw, img_rgb, text_x, text_y, text_width, text_height)
-            draw.text(
-                (text_x, text_y),
-                str(value),
-                fill=(0, 0, 0, 255),
-                font=use_font,
-            )
+                field_config = special_fields.get(field_name.lower(), {"size": font_size, "y_offset": 0, "bold": False})
+                use_size = field_config.get("size", font_size)
+                use_bold = field_config.get("bold", False)
+
+                font_to_use = _get_bold_font(primary_font) if (use_bold and primary_font) else primary_font
+                use_font = _get_font(font_to_use, use_size) if font_to_use else ImageFont.load_default()
+
+                bbox = draw.textbbox((0, 0), str(value), font=use_font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                
+                text_x = center_x - text_width // 2
+                text_y = detected_lines[line_idx] - text_height - 10  # Place slightly above the line
+
+                draw.text(
+                    (text_x, text_y),
+                    str(value),
+                    fill=(0, 0, 0, 255),
+                    font=use_font,
+                )
+
+        else:
+            # Fallback if lines not detected
+            start_y = int(height * 0.45)
+            # Only print core fields to avoid messy overlap
+            core_fields = ["participant_name", "prize_position", "event_name", "date"]
+            
+            for i, field_name in enumerate(core_fields):
+                value = data.get(field_name)
+                if not value or not str(value).strip():
+                    continue
+                
+                if field_name == "prize_position" and str(value).strip().lower() in ["participation", "none"]:
+                    continue
+
+                field_config = special_fields.get(field_name.lower(), {"size": font_size, "y_offset": 0, "bold": False})
+                use_size = field_config.get("size", font_size)
+                use_bold = field_config.get("bold", False)
+
+                if field_name.lower() == "date":
+                    val_str = str(value).strip()
+                    for time_pattern in [" 00:00:00", "T00:00:00", " 00:00", "T00:00"]:
+                        if time_pattern in val_str:
+                            val_str = val_str.replace(time_pattern, "")
+                    value = val_str.strip()
+
+                if field_name.lower() in special_fields:
+                    y_offset = special_fields[field_name.lower()]["y_offset"]
+                else:
+                    y_offset = 4 * (font_size + 30) + (font_size + 20) * i
+
+                font_to_use = _get_bold_font(primary_font) if (use_bold and primary_font) else primary_font
+                use_font = _get_font(font_to_use, use_size) if font_to_use else ImageFont.load_default()
+
+                bbox = draw.textbbox((0, 0), str(value), font=use_font)
+                text_width = bbox[2] - bbox[0]
+                text_x = center_x - text_width // 2
+                text_y = start_y + y_offset
+
+                draw.text(
+                    (text_x, text_y),
+                    str(value),
+                    fill=(0, 0, 0, 255),
+                    font=use_font,
+                )
 
     if qr_data:
         qr = qrcode.QRCode(version=1, box_size=10, border=1)

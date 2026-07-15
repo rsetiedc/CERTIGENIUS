@@ -24,6 +24,10 @@
             {% endif %}
         {% endif %}
         {% if batch.status in ('generated', 'completed') and batch.generated_count > 0 %}
+            <button type="button" class="btn btn-outline-success" id="downloadAllZipBtn"
+                    onclick="downloadAllZip({{ batch.id }})">
+                <i class="bi bi-file-zip me-1"></i>Download All as ZIP
+            </button>
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#distributeModal">
                 <i class="bi bi-envelope-paper me-1"></i>Distribute via Email
             </button>
@@ -310,6 +314,122 @@
 </div>
 {% endif %}
 
+<!-- ZIP Download Overlay -->
+<div id="zipOverlay" class="d-none">
+    <div class="zip-overlay-content">
+        <div class="spinner-container">
+            <div class="zip-spinner">
+                <div class="zip-spinner-ring"></div>
+                <i class="bi bi-file-zip zip-spinner-icon"></i>
+            </div>
+        </div>
+        <h4 class="fw-bold mt-4 mb-2">Preparing Your ZIP Download...</h4>
+        <p class="text-muted mb-0">Compressing certificate files into a single archive</p>
+        <div class="zip-progress-line mt-4">
+            <div class="zip-progress-fill"></div>
+        </div>
+    </div>
+</div>
+
+<style>
+#zipOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.3s ease;
+}
+
+#zipOverlay.d-none {
+    display: none !important;
+}
+
+.zip-overlay-content {
+    text-align: center;
+    padding: 2rem;
+    max-width: 400px;
+}
+
+.zip-overlay-content h4 {
+    color: #fff;
+}
+
+.zip-overlay-content p {
+    color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.spinner-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 0.5rem;
+}
+
+.zip-spinner {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.zip-spinner-ring {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border: 4px solid rgba(102, 126, 234, 0.15);
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: zip-spin 1s linear infinite;
+}
+
+.zip-spinner-icon {
+    font-size: 2rem;
+    color: #667eea;
+    animation: zip-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes zip-spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes zip-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.7; }
+    50% { transform: scale(1.1); opacity: 1; }
+}
+
+.zip-progress-line {
+    width: 200px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 0 auto;
+}
+
+.zip-progress-fill {
+    height: 100%;
+    width: 30%;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    border-radius: 2px;
+    animation: zip-progress 2s ease-in-out infinite;
+}
+
+@keyframes zip-progress {
+    0% { transform: translateX(-100%); width: 30%; }
+    50% { transform: translateX(200%); width: 60%; }
+    100% { transform: translateX(400%); width: 30%; }
+}
+</style>
+
 <!-- Distribute Modal -->
 <div class="modal fade" id="distributeModal" tabindex="-1">
     <div class="modal-dialog">
@@ -359,6 +479,68 @@
 
 {% block extra_scripts %}
 <script>
+    // ====== ZIP Download ======
+    var zipDownloading = false;
+
+    function downloadAllZip(batchId) {
+        if (zipDownloading) return;
+        zipDownloading = true;
+
+        // Show overlay with fade-in
+        var overlay = document.getElementById('zipOverlay');
+        overlay.classList.remove('d-none');
+        overlay.style.opacity = '0';
+        void overlay.offsetHeight; // Force reflow to trigger CSS transition
+        overlay.style.opacity = '1';
+
+        var completed = false;
+
+        function hideOverlay() {
+            if (completed) return;
+            completed = true;
+            overlay.style.opacity = '0';
+            // Clean up the iframe
+            if (iframe && iframe.parentNode) {
+                iframe.parentNode.removeChild(iframe);
+            }
+            setTimeout(function() {
+                overlay.classList.add('d-none');
+                zipDownloading = false;
+            }, 300);
+        }
+
+        // Create a hidden iframe to trigger the download without navigating away
+        var iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = '/batches/' + batchId + '/download-all';
+        document.body.appendChild(iframe);
+
+        var startTime = Date.now();
+
+        // Attach focus listener immediately to catch fast downloads too.
+        // Only accept focus events after a minimum delay to avoid catching
+        // unrelated window focus switches.
+        window.addEventListener('focus', function onFocus() {
+            window.removeEventListener('focus', onFocus);
+            var elapsed = Date.now() - startTime;
+            var delay = elapsed < 2000 ? 2000 - elapsed : 500;
+            setTimeout(hideOverlay, delay);
+        });
+
+        // If the iframe loads a new page quickly, it means the server redirected
+        // (e.g., flash error + redirect) rather than serving a download.
+        // Ignore loads within 300ms to filter out spurious about:blank events.
+        iframe.addEventListener('load', function() {
+            if (Date.now() - startTime < 300) return;
+            setTimeout(hideOverlay, 500);
+        });
+
+        // Safety timeout - hide after 15 seconds regardless
+        setTimeout(function() {
+            hideOverlay();
+        }, 15000);
+    }
+
     // Auto-refresh for active batches
     {% if batch.status in ('generating', 'distributing') %}
     setTimeout(function() {

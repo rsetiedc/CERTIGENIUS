@@ -31,6 +31,7 @@ import openpyxl
 from utils.certificate_generator import generate_certificate
 from utils.email_sender import EmailSender
 from utils.excel_parser import parse_file
+import zipfile
 
 # Configure logging
 logging.basicConfig(
@@ -80,6 +81,12 @@ def create_app():
     os.makedirs(
         os.path.join(app.root_path, Config.CERTIFICATE_FOLDER), exist_ok=True
     )
+
+    # Set up WhiteNoise for serving static files efficiently in production
+    from whitenoise import WhiteNoise
+    static_dir = os.path.join(app.root_path, "static")
+    os.makedirs(static_dir, exist_ok=True)
+    app.wsgi_app = WhiteNoise(app.wsgi_app, root=static_dir, prefix="static/")
 
     with app.app_context():
         db.create_all()
@@ -596,7 +603,8 @@ def register_routes(app):
         email_sender = EmailSender(sender_email=sender_email if sender_email else None)
         if not email_sender.is_configured():
             flash(
-                "Email sender is not configured. Please set MAIL_USERNAME and MAIL_PASSWORD in .env file.",
+                "Email sender is not configured. Set MAIL_USERNAME and MAIL_PASSWORD "
+                "in .env (local) or .streamlit/secrets.toml (Streamlit Cloud).",
                 "error",
             )
             return redirect(url_for("batch_detail", batch_id=batch_id))
@@ -686,7 +694,16 @@ def register_routes(app):
                         failed_count += 1
                         
                     # Commit progress per certificate to show live updates
-                    db.session.commit()
+                    import sqlalchemy
+                    try:
+                        db.session.commit()
+                    except sqlalchemy.orm.exc.StaleDataError:
+                        db.session.rollback()
+                        logger.warning(f"Batch or certificate deleted during distribution. Stopping.")
+                        break
+                    except Exception as e:
+                        db.session.rollback()
+                        logger.exception(f"Error committing progress for certificate ID {cert.id}: {e}")
 
                 email_sender.disconnect()
 
@@ -705,7 +722,15 @@ def register_routes(app):
                     batch.status = "failed"
                     batch.error_message = f"All {failed_count} emails failed"
 
-                db.session.commit()
+                import sqlalchemy
+                try:
+                    db.session.commit()
+                except sqlalchemy.orm.exc.StaleDataError:
+                    db.session.rollback()
+                    logger.warning("Batch deleted during final commit. Skipping.")
+                except Exception as e:
+                    db.session.rollback()
+                    logger.exception(f"Error committing final batch status: {e}")
 
         cert_ids = [c.id for c in certificates]
         thread = threading.Thread(
@@ -742,6 +767,55 @@ def register_routes(app):
             download_name=f"certificate_{cert.participant.name.replace(' ', '_')}.pdf"
             if cert.participant
             else "certificate.pdf",
+        )
+
+    # ---------- Batch ZIP Download ----------
+
+    @app.route("/batches/<int:batch_id>/download-all")
+    def download_all_certificates(batch_id):
+        """Download all generated certificates in a batch as a single ZIP file."""
+        batch = CertificateBatch.query.get_or_404(batch_id)
+
+        certificates = Certificate.query.filter(
+            Certificate.batch_id == batch.id,
+            Certificate.status.in_(["generated", "sent"]),
+            Certificate.file_path.isnot(None),
+            Certificate.file_path != "",
+        ).all()
+
+        if not certificates:
+            flash("No generated certificates to download.", "warning")
+            return redirect(url_for("batch_detail", batch_id=batch_id))
+
+        # Create ZIP in memory
+        zip_buffer = io.BytesIO()
+        files_added = 0
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for cert in certificates:
+                full_path = os.path.join(app.root_path, cert.file_path)
+                if not os.path.exists(full_path):
+                    logger.warning(f"Certificate file not found on disk, skipping: {full_path}")
+                    continue
+
+                # Use participant name as the filename inside the zip
+                safe_name = cert.participant.name.replace(" ", "_").replace("/", "_") if cert.participant else f"certificate_{cert.id}"
+                arcname = f"{safe_name}.pdf"
+
+                zf.write(full_path, arcname=arcname)
+                files_added += 1
+
+        if files_added == 0:
+            flash("No certificate files found on disk to download.", "error")
+            return redirect(url_for("batch_detail", batch_id=batch_id))
+
+        zip_buffer.seek(0)
+
+        safe_batch_name = batch.name.replace(" ", "_").replace("/", "_")[:50]
+        return send_file(
+            zip_buffer,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"{safe_batch_name}_certificates.zip",
         )
 
     # ---------- Sample Template Download ----------
@@ -1063,4 +1137,5 @@ def register_routes(app):
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host="0.0.0.0", port=port)
