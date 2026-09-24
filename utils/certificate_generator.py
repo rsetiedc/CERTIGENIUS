@@ -31,8 +31,15 @@ def _get_font(font_path, size):
 
 
 def _get_available_fonts():
-    """Return a list of available font paths, preferring common system fonts."""
+    """Return a list of available font paths, preferring common system fonts.
+    Prioritizes Liberation Serif Bold Italic when available."""
+    # Get the base directory for project fonts
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    liberation_bold_italic = os.path.join(base_dir, "fonts", "LiberationSerif-BoldItalic.ttf")
+
     font_candidates = [
+        # Project font (preferred) - Liberation Serif Bold Italic
+        liberation_bold_italic,
         # macOS
         "/System/Library/Fonts/Helvetica.ttc",
         "/System/Library/Fonts/Helvetica.ttf",
@@ -59,7 +66,11 @@ def _get_available_fonts():
 
 
 def _get_bold_font(font_path):
-    """Get a bold variant of a font."""
+    """Get a bold variant of a font. For Liberation Serif Bold Italic, returns itself."""
+    # If the font is already Liberation Serif Bold Italic, return it as-is
+    if "LiberationSerif-BoldItalic" in font_path:
+        return font_path
+
     bold_variants = {
         "/System/Library/Fonts/Helvetica.ttc": "/System/Library/Fonts/Helvetica-Bold.ttf",
         "/System/Library/Fonts/Helvetica.ttf": "/System/Library/Fonts/Helvetica-Bold.ttf",

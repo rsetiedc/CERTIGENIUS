@@ -23,13 +23,20 @@ st.markdown("Upload a CSV or Excel file with participant data to create a new ba
 
 # ---- Upload Form ----
 with st.form("import_form", clear_on_submit=True):
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         batch_name = st.text_input(
             "Batch Name",
             placeholder=f"e.g., Summer Workshop {datetime.now().year}",
         )
     with col2:
+        event_type = st.selectbox(
+            "Event Type",
+            options=["ISA Event", "Non-ISA Event"],
+            help="Select whether this batch is for an ISA or Non-ISA event. Templates will be chosen accordingly.",
+        )
+        event_type_value = "isa" if event_type == "ISA Event" else "non_isa"
+    with col3:
         session = get_session()
         try:
             template_groups = session.query(TemplateGroup).filter_by(is_deleted=False).all()
@@ -86,6 +93,7 @@ with st.form("import_form", clear_on_submit=True):
             batch = CertificateBatch(
                 name=bname,
                 template_group_id=template_group_id,
+                event_type=event_type_value,
                 status="pending",
                 total_count=0,
             )

@@ -12,6 +12,16 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+# Flask-SQLAlchemy db object (initialized with app in app.py via db.init_app(app))
+try:
+    from flask_sqlalchemy import SQLAlchemy
+    db = SQLAlchemy(model_class=Base)
+except ImportError:
+    # Streamlit-only environment: provide a dummy db object
+    class _DummyDB:
+        session = None
+    db = _DummyDB()
+
 
 def _normalize_position(pos):
     """Normalize a prize position string for matching.
@@ -162,6 +172,7 @@ class CertificateBatch(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False)
     template_group_id = Column(Integer, ForeignKey("template_groups.id"), nullable=True)
+    event_type = Column(String(20), default="non_isa")  # 'isa' or 'non_isa'
     status = Column(String(20), default="pending")
     total_count = Column(Integer, default=0)
     generated_count = Column(Integer, default=0)
@@ -184,6 +195,7 @@ class CertificateBatch(Base):
             "name": self.name,
             "template_group_id": self.template_group_id,
             "template_group_name": self.template_group.name if self.template_group else "Unknown",
+            "event_type": self.event_type or "non_isa",
             "status": self.status,
             "total_count": self.total_count,
             "generated_count": self.generated_count,

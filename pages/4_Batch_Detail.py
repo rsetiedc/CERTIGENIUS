@@ -106,6 +106,12 @@ with col4:
 if batch.template_group:
     st.info(f"📄 Template Group: **{batch.template_group.name}**")
 
+# Show event type
+if batch.event_type == "isa":
+    st.info("🏛️ Event Type: **ISA Event** — Using ISA certificate templates")
+else:
+    st.info("📌 Event Type: **Non-ISA Event** — Using Non-ISA certificate templates")
+
 # ---- Participants ----
 st.markdown("---")
 st.subheader("👥 Participants")
@@ -178,6 +184,13 @@ with act_col1:
         finally:
             group.close()
 
+        # Determine template folder based on event type
+        event_type = batch.event_type or "non_isa"
+        if event_type == "isa":
+            built_in_template_dir = os.path.join(os.getcwd(), "uploads", "templates", "isa_events")
+        else:
+            built_in_template_dir = os.path.join(os.getcwd(), "uploads", "templates", "non_isa_events")
+
         # Update status
         session = get_session()
         try:
@@ -209,11 +222,29 @@ with act_col1:
                     if not template:
                         raise ValueError(f"No template for position: {participant.prize_position}")
 
-                    template_path = os.path.join(os.getcwd(), template.file_path)
-                    if not os.path.exists(template_path):
-                        raise FileNotFoundError(f"Template not found: {template_path}")
+                    # Use built-in ISA/non-ISA templates if available
+                    built_in_template_path = None
+                    if os.path.isdir(built_in_template_dir):
+                        position = (participant.prize_position or "").strip().lower()
+                        # Map position to template filename: 1.png, 2.png, etc.
+                        pos_to_file = {
+                            "1st": "1.png", "first": "1.png",
+                            "2nd": "2.png", "second": "2.png",
+                        }
+                        template_filename = pos_to_file.get(position, "1.png")
+                        candidate = os.path.join(built_in_template_dir, template_filename)
+                        if os.path.exists(candidate):
+                            built_in_template_path = candidate
 
-                    placeholders = template.get_placeholders()
+                    if built_in_template_path:
+                        template_path = built_in_template_path
+                        placeholders = None  # Use auto-detection for built-in templates
+                    else:
+                        template_path = os.path.join(os.getcwd(), template.file_path)
+                        if not os.path.exists(template_path):
+                            raise FileNotFoundError(f"Template not found: {template_path}")
+                        placeholders = template.get_placeholders()
+
                     extra = participant.get_extra_data()
 
                     data = {

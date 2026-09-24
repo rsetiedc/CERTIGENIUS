@@ -48,9 +48,11 @@ for b in batches:
     if b.total_count > 0:
         done = (b.generated_count or 0) + (b.sent_count or 0)
         progress = f"{done}/{b.total_count}"
+    event_label = "ISA Event" if (b.event_type or "non_isa") == "isa" else "Non-ISA"
     rows.append({
         "ID": b.id,
         "Name": b.name,
+        "Event Type": event_label,
         "Status": status_badge(b.status),
         "Total": b.total_count,
         "Generated": b.generated_count or 0,

@@ -264,6 +264,7 @@ def register_routes(app):
             batch_name = f"Batch {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 
         template_group_id = request.form.get("template_group_id", type=int)
+        event_type = request.form.get("event_type", "non_isa")
 
         # Validate file type
         allowed_extensions = {".csv", ".xlsx", ".xls"}
@@ -295,6 +296,7 @@ def register_routes(app):
         batch = CertificateBatch(
             name=batch_name,
             template_group_id=template_group_id,
+            event_type=event_type,
             status="pending",
             total_count=0,
         )
@@ -382,6 +384,13 @@ def register_routes(app):
             flash("Assigned template group not found or has been deleted.", "error")
             return redirect(url_for("batch_detail", batch_id=batch_id))
 
+        # Determine template folder based on event type
+        event_type = batch.event_type or "non_isa"
+        if event_type == "isa":
+            built_in_template_dir = os.path.join(app.root_path, "uploads", "templates", "isa_events")
+        else:
+            built_in_template_dir = os.path.join(app.root_path, "uploads", "templates", "non_isa_events")
+
         # Update batch status
         batch.status = "generating"
         db.session.commit()
@@ -402,11 +411,27 @@ def register_routes(app):
                 if not template:
                     raise ValueError(f"No template found for position: {participant.prize_position}")
 
-                template_path = os.path.join(app.root_path, template.file_path)
-                if not os.path.exists(template_path):
-                    raise FileNotFoundError(f"Template file not found: {template_path}")
+                # Use built-in ISA/non-ISA templates if available
+                built_in_template_path = None
+                if os.path.isdir(built_in_template_dir):
+                    position = (participant.prize_position or "").strip().lower()
+                    pos_to_file = {
+                        "1st": "1.png", "first": "1.png",
+                        "2nd": "2.png", "second": "2.png",
+                    }
+                    template_filename = pos_to_file.get(position, "1.png")
+                    candidate = os.path.join(built_in_template_dir, template_filename)
+                    if os.path.exists(candidate):
+                        built_in_template_path = candidate
 
-                placeholders = template.get_placeholders()
+                if built_in_template_path:
+                    template_path = built_in_template_path
+                    placeholders = None  # Use auto-detection for built-in templates
+                else:
+                    template_path = os.path.join(app.root_path, template.file_path)
+                    if not os.path.exists(template_path):
+                        raise FileNotFoundError(f"Template file not found: {template_path}")
+                    placeholders = template.get_placeholders()
 
                 # Prepare data for the certificate
                 extra = participant.get_extra_data()

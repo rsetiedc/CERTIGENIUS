@@ -145,6 +145,16 @@
                     </tr>
                     {% endif %}
                     <tr>
+                        <td class="text-muted">Event Type</td>
+                        <td>
+                            {% if batch.event_type == 'isa' %}
+                                <span class="badge bg-info"><i class="bi bi-building me-1"></i>ISA Event</span>
+                            {% else %}
+                                <span class="badge bg-secondary"><i class="bi bi-calendar-event me-1"></i>Non-ISA Event</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
                         <td class="text-muted">Created</td>
                         <td>{{ batch.created_at.strftime('%B %d, %Y at %I:%M %p') if batch.created_at else '—' }}</td>
                     </tr>

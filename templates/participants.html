@@ -21,6 +21,15 @@
                                placeholder="e.g., Summer Workshop 2024">
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label">Event Type</label>
+                        <select class="form-select" name="event_type">
+                            <option value="non_isa">Non-ISA Event</option>
+                            <option value="isa">ISA Event</option>
+                        </select>
+                        <div class="form-text">Select whether this batch is for an ISA or Non-ISA event. Templates will be chosen accordingly.</div>
+                    </div>
+
                     <div class="mb-3">  
                         <label class="form-label">Associate Template Group (optional)</label>
                         <select class="form-select" name="template_group_id">
