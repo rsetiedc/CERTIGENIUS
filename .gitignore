@@ -6,7 +6,9 @@
 *.sqlite
 
 # Uploads
-uploads/
+uploads/*
+!uploads/templates/
+!uploads/templates/**
 generated_certificates/
 
 # Python
